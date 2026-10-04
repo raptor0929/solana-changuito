@@ -12,15 +12,25 @@ import {
 import { hexToBytes, openIx } from '../escrow.ts';
 import { rpc } from '../solana.ts';
 import { usdcAccount } from '../usdc.ts';
-import type { QuoteResponse } from './types.ts';
+
+export interface OpenArgs {
+  programId: string;
+  usdcMint: string;
+  orderId: string;
+  amount: string;
+  basketHash: string;
+  timeoutSecs: number;
+}
 
 /**
- * The unsigned `open` transaction, serialized, for the Privy wallet to sign
- * and send. The buyer is the fee payer on paper; with `sponsor: true` Privy
- * pays the fee, and the buyer pays only the rent for the order and vault
- * accounts (the faucet sends SOL for that).
+ * The unsigned `open` transaction, serialized. Built on the server
+ * (app/api/checkout/open) with the resolver as fee payer, so the shopper's
+ * wallet needs no SOL for fees; it signs as the buyer and the server adds the
+ * resolver's signature and sends. The buyer still pays the rent for the order
+ * and vault accounts (`payer = buyer` in the program), which is why the faucet
+ * sends a little SOL with the USDC.
  */
-export async function openTransaction(buyer: string, q: QuoteResponse): Promise<Uint8Array> {
+export async function openTransaction(buyer: string, q: OpenArgs, feePayer: string = buyer): Promise<Uint8Array> {
   const ix = await openIx({
     program: address(q.programId),
     buyer: address(buyer),
@@ -34,7 +44,7 @@ export async function openTransaction(buyer: string, q: QuoteResponse): Promise<
   const { value: blockhash } = await rpc().getLatestBlockhash({ commitment: 'confirmed' }).send();
   const msg = pipe(
     createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(address(buyer), m),
+    (m) => setTransactionMessageFeePayer(address(feePayer), m),
     (m) => setTransactionMessageLifetimeUsingBlockhash(blockhash, m),
     (m) => appendTransactionMessageInstructions([ix], m),
   );

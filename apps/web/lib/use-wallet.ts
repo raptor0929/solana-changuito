@@ -26,11 +26,11 @@ export interface WalletState {
   /** Privy access token, for /api/session/login. */
   accessToken: () => Promise<string | null>;
   /**
-   * Sign and send a serialized transaction with the embedded wallet. Fees are
-   * sponsored by Privy, so the wallet needs no SOL for them (rent is separate).
-   * Resolves to the base58 signature.
+   * Sign a serialized transaction with the embedded wallet, without sending
+   * it. The server built it with the resolver as fee payer, and adds that
+   * signature and sends. Resolves to the wire bytes with the buyer's signature.
    */
-  signAndSend: (tx: Uint8Array) => Promise<string>;
+  signTransaction: (tx: Uint8Array) => Promise<Uint8Array>;
 }
 
 const missing = async (): Promise<never> => {
@@ -46,7 +46,7 @@ export const WALLET_OFF: WalletState = {
   login: () => {},
   logout: async () => {},
   accessToken: async () => null,
-  signAndSend: missing,
+  signTransaction: missing,
 };
 
 export const WalletContext = createContext<WalletState>(WALLET_OFF);

@@ -7,7 +7,6 @@ import type { Cart } from '@changuito/mcp/types';
 import { track } from '../lib/analytics';
 import type { Receipt } from '../lib/chat-store.ts';
 import { escrowCopy } from '../lib/checkout/copy.ts';
-import { openTransaction } from '../lib/checkout/open-tx.ts';
 import type { QuoteResponse, StatusResponse } from '../lib/checkout/types.ts';
 import { ensureUserCookie } from '../lib/session-login';
 import { explorerTx } from '../lib/solana.ts';
@@ -19,10 +18,11 @@ import { useLang } from './LangProvider';
  * From a full basket to a settled escrow, in four steps:
  *
  *   1. login   — email through Privy; the embedded Solana wallet comes with it.
- *   2. lock    — the server quotes (order id, basket hash, USDC amount), the
- *                browser builds `open`, the wallet signs it with fees
- *                sponsored by Privy. The USDC is now in a vault the program
- *                owns, not in an account of ours.
+ *   2. lock    — the server quotes (order id, basket hash, USDC amount) and
+ *                builds `open` with the resolver as fee payer; the wallet
+ *                signs it as the buyer, the server co-signs and sends. The
+ *                USDC is now in a vault the program owns, not in an account
+ *                of ours.
  *   3. shop    — the server starts a sandbox job (services/sandbox) that fills
  *                Día's cart and walks checkout to the card step. This dialog
  *                polls /api/checkout/status, which reports the phase.
@@ -112,8 +112,24 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
     setStep('locking');
     setError(null);
     try {
-      const tx = await openTransaction(wallet.address, quote);
-      const sig = await wallet.signAndSend(tx);
+      // The server builds `open` with the resolver paying the fee; the wallet
+      // signs as the buyer and the server co-signs and sends.
+      const built = await fetch('/api/checkout/open', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderId: quote.orderId }),
+      });
+      const unsigned = await built.json().catch(() => null);
+      if (!built.ok) throw new Error(unsigned?.error ?? copy.failed);
+      const signed = await wallet.signTransaction(Uint8Array.from(atob(unsigned.tx), (c) => c.charCodeAt(0)));
+      const sent = await fetch('/api/checkout/open', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderId: quote.orderId, tx: btoa(String.fromCharCode(...signed)) }),
+      });
+      const opened = await sent.json().catch(() => null);
+      if (!sent.ok) throw new Error(opened?.error ?? copy.failed);
+      const sig = opened.openSig as string;
       setOpenSig(sig);
       track('escrow_open', { amount: quote.amountDisplay });
       const res = await fetch('/api/checkout/start', {

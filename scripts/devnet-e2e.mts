@@ -7,23 +7,23 @@
  * is minted with the dev session secret (so this only works against
  * `next dev` without CHG_SESSION_SECRET, or with it exported here too). Then:
  *
- *   faucet -> quote -> sign + send `open` -> start -> poll status
+ *   faucet -> quote -> open (server builds, resolver pays the fee) -> buyer
+ *   signs -> server co-signs and sends -> start -> poll status
  *
  * and prints the outcome with Solscan links. With SANDBOX_MOCK_FAIL=1 on the
  * dev server the same run ends in a refund instead of a settle.
  */
 import {
   generateKeyPairSigner,
-  getTransactionDecoder,
-  signTransaction,
+  getBase64Encoder,
   getBase64EncodedWireTransaction,
-  getSignatureFromTransaction,
+  getTransactionDecoder,
+  partiallySignTransaction,
 } from '@solana/kit';
 
-import { openTransaction } from '../apps/web/lib/checkout/open-tx.ts';
 import type { QuoteResponse, StatusResponse } from '../apps/web/lib/checkout/types.ts';
 import { mintUserToken, sessionSecret } from '../apps/web/lib/login-gate.ts';
-import { explorerTx, rpc, waitFor } from '../apps/web/lib/solana.ts';
+import { explorerTx } from '../apps/web/lib/solana.ts';
 
 const BASE = process.argv[2] ?? 'http://localhost:3124';
 
@@ -59,14 +59,13 @@ const quote = (await call('/api/checkout/quote', {
 })) as QuoteResponse;
 console.log('quote', quote.amountDisplay, 'USDC for', cart.total.display, 'order', quote.orderId.slice(0, 12));
 
-// What Privy does in the browser: sign the bytes the app built, and send.
-const wire = await openTransaction(buyer.address, quote);
-const tx = await signTransaction([buyer.keyPair], getTransactionDecoder().decode(wire));
-const openSig = getSignatureFromTransaction(tx);
-await rpc()
-  .sendTransaction(getBase64EncodedWireTransaction(tx), { encoding: 'base64', preflightCommitment: 'confirmed' })
-  .send();
-await waitFor(openSig);
+// What Privy does in the browser: sign the server's bytes as the buyer, no send.
+const { tx: unsigned } = await call('/api/checkout/open', { method: 'POST', body: JSON.stringify({ orderId: quote.orderId }) });
+const signed = await partiallySignTransaction([buyer.keyPair], getTransactionDecoder().decode(getBase64Encoder().encode(unsigned)));
+const { openSig } = await call('/api/checkout/open', {
+  method: 'PUT',
+  body: JSON.stringify({ orderId: quote.orderId, tx: getBase64EncodedWireTransaction(signed) }),
+});
 console.log('open', explorerTx(openSig));
 
 let status = (await call('/api/checkout/start', {
@@ -75,7 +74,7 @@ let status = (await call('/api/checkout/start', {
 })) as StatusResponse;
 const t0 = Date.now();
 while (status.stage !== 'done' && status.stage !== 'refunded') {
-  if (Date.now() - t0 > 180_000) throw new Error('timed out at ' + status.stage + '/' + status.phase);
+  if (Date.now() - t0 > 900_000) throw new Error('timed out at ' + status.stage + '/' + status.phase);
   await new Promise((r) => setTimeout(r, 3000));
   status = (await call(`/api/checkout/status?orderId=${quote.orderId}`)) as StatusResponse;
   console.log('  ', status.stage, status.phase ?? '');

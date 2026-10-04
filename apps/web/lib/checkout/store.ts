@@ -32,6 +32,13 @@ export interface CheckoutRecord {
   createdAt: number;
 
   jobId?: string;
+  /**
+   * Base64 of the `open` message the server built for this order, with the
+   * resolver as fee payer. The resolver co-signs exactly these bytes and
+   * nothing else: its key pays the fee, so it must not sign whatever the
+   * browser sends back.
+   */
+  openMessage?: string;
   openSig?: string;
   /** Last phase the sandbox reported. */
   phase?: string;

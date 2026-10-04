@@ -2,9 +2,9 @@
  * POST /api/faucet  ->  { address, usdc, usdcDisplay, txHash, created }
  *
  * Devnet only: mints our test USDC to the signed-in shopper's Privy wallet and
- * sends a pinch of SOL with it. The SOL is rent, not fees — Privy sponsors the
- * fees, but `open` creates an order account and a vault, and the buyer pays
- * for those. The vault's rent comes back when it closes on settle or refund;
+ * sends a pinch of SOL with it. The SOL is rent, not fees — the resolver pays
+ * the `open` fee (/api/checkout/open), but `open` creates an order account and
+ * a vault, and the buyer pays for those. The vault's rent comes back when it closes on settle or refund;
  * the order account stays as the on-chain record, and its rent with it.
  *
  * One transaction, signed by the resolver, which is the mint authority:

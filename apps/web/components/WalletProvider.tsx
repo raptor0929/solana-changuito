@@ -1,8 +1,8 @@
 'use client';
 
 import { PrivyProvider, usePrivy } from '@privy-io/react-auth';
-import { useSignAndSendTransaction, useWallets } from '@privy-io/react-auth/solana';
-import { createSolanaRpc, createSolanaRpcSubscriptions, getBase58Decoder } from '@solana/kit';
+import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
+import { createSolanaRpc, createSolanaRpcSubscriptions } from '@solana/kit';
 import { useCallback, useMemo } from 'react';
 
 import { DEFAULT_RPC } from '../lib/solana.ts';
@@ -13,8 +13,9 @@ const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || DEFAULT_RPC;
 const WS = RPC.replace(/^http/, 'ws');
 
 /**
- * Privy: email login, an embedded Solana wallet created on first login, and
- * sponsored fees on devnet. Without an app id the children render as they are
+ * Privy: email or Google login and an embedded Solana wallet created on first
+ * login. The wallet only signs; the server pays the fee and sends (see
+ * app/api/checkout/open). Without an app id the children render as they are
  * and `useWallet()` answers `enabled: false`.
  */
 export function WalletProvider({ children }: { children: React.ReactNode }) {
@@ -35,7 +36,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     <PrivyProvider
       appId={APP_ID}
       config={{
-        loginMethods: ['email'],
+        loginMethods: ['email', 'google'],
         appearance: { walletChainType: 'solana-only', theme: 'light', accentColor: '#1f7a4d' },
         embeddedWallets: { solana: { createOnLogin: 'all-users' }, ethereum: { createOnLogin: 'off' } },
         solana: { rpcs: rpcs as never },
@@ -49,25 +50,20 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 function Bridge({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
-  const { signAndSendTransaction } = useSignAndSendTransaction();
+  const { signTransaction: privySign } = useSignTransaction();
 
   // The embedded wallet, not whatever else the user linked.
   const wallet =
     wallets.find((w) => (w as { standardWallet?: { name?: string } }).standardWallet?.name === 'Privy') ?? wallets[0];
   const address = authenticated ? (wallet?.address ?? null) : null;
 
-  const signAndSend = useCallback(
+  const signTransaction = useCallback(
     async (tx: Uint8Array) => {
       if (!wallet) throw new Error('No hay billetera conectada.');
-      const { signature } = await signAndSendTransaction({
-        transaction: tx,
-        wallet,
-        chain: 'solana:devnet',
-        options: { sponsor: true },
-      });
-      return getBase58Decoder().decode(signature);
+      const { signedTransaction } = await privySign({ transaction: tx, wallet, chain: 'solana:devnet' });
+      return signedTransaction;
     },
-    [wallet, signAndSendTransaction],
+    [wallet, privySign],
   );
 
   const value = useMemo<WalletState>(
@@ -80,9 +76,9 @@ function Bridge({ children }: { children: React.ReactNode }) {
       login: () => login(),
       logout: () => logout(),
       accessToken: () => getAccessToken(),
-      signAndSend,
+      signTransaction,
     }),
-    [ready, walletsReady, authenticated, address, user, login, logout, getAccessToken, signAndSend],
+    [ready, walletsReady, authenticated, address, user, login, logout, getAccessToken, signTransaction],
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
