@@ -92,8 +92,11 @@ COLLECT_JS = r"""
     if (isField) {
       const lab = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
       const grp = el.closest('flt-semantics[aria-label]');
-      fieldLabel = clean([lab && lab.innerText, el.getAttribute('aria-label'), el.placeholder, el.name,
-                          grp && grp.getAttribute('aria-label')].filter(Boolean).join(' / '));
+      // A radio wrapped in its <label> ("Envío programado") is named by that text, not by its
+      // group name ("DeliveryType"), or every radio in the group reads the same and dedupes to one.
+      const wrap = ['radio', 'checkbox'].includes(el.type) && el.closest('label');
+      fieldLabel = clean([lab && lab.innerText, wrap && wrap.innerText, el.getAttribute('aria-label'), el.placeholder,
+                          (lab || wrap) ? '' : el.name, grp && grp.getAttribute('aria-label')].filter(Boolean).join(' / '));
     }
     // VTEX modal triggers (e.g. 'Agregar') all share aria-label 'Modal abierto'; their text is the real label.
     const trigger = el.matches('div[class*=triggerContainer]');

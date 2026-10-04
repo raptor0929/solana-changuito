@@ -16,6 +16,14 @@ is kept as [`UPSTREAM.md`](UPSTREAM.md) and its field notes as
 [`docs/dia-navigation.md`](docs/dia-navigation.md). changuito added `run_job()`
 in `agent.py`, the job API in `server.py`, the `Dockerfile` and `railway.json`.
 
+`sandbox.py` and `agent.py` also differ from upstream by one fix: Día's
+delivery modal needs the "Envío programado" radio before `Confirmar` enables,
+and upstream labelled radios by their `name` (`DeliveryType`), so both
+delivery options collapsed into one and the run looped. Radios and checkboxes
+now take their wrapping `<label>` text, and the `shop` instruction says to pick
+Envío programado. Details in
+[`docs/sandbox.md`](../../docs/sandbox.md#the-delivery-type-radios).
+
 ## Run locally
 
 Python 3.12 and [uv](https://docs.astral.sh/uv/).

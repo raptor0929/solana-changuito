@@ -99,7 +99,9 @@ INSTRUCTIONS = {
     "empty_cart": "Empty the cart: remove every product (trash / Eliminar / quitar). Do not add anything.",
     "shop": ("Add '{item}' to the cart: search for it if it is not on screen, then press Agregar on the product "
              "card that best matches it. Confirm quantity 1 if a modal asks. If a modal asks for the delivery "
-             "location or method, select the saved address, choose home delivery (Envío a domicilio) and confirm."),
+             "location or method, select the saved address and confirm, then choose home delivery (Envío a domicilio), "
+             "select 'Envío programado' (scheduled delivery, never Express or store pickup) and press Confirmar. "
+             "Confirmar stays disabled until a delivery type is selected."),
     "checkout": ("Advance checkout to the payment step: continue from the cart, keep the account's saved address "
                  "with home delivery, pick the earliest available delivery window, and if asked what to do with "
                  "missing products choose NOT to replace them. Never enter payment or card details."),

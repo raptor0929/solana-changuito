@@ -85,6 +85,7 @@ After that:
 - **The first add opens modals** (they are only shown once per session):
   1. **"Ingresá tu ubicación" (delivery location):** pick the saved-address radio, then `Confirmar`. This modal needs Google Maps (§2). Each saved-address row also has ✕ / "Eliminar" controls, so only offer the label or radio inside `[class*=address-list-item]`.
   2. **Delivery method:** "Envío a domicilio (express o programado)" → "Envío programado" → `Confirmar`.
+     *(changuito, 2026-10-04.)* `Confirmar` stays disabled until a delivery-type radio is selected. Both radios share `name="DeliveryType"` and are named only by their wrapping `<label>`, so a collector that labels radios by `name` turns them into one meaningless option, and the agent loops re-clicking "Envío a domicilio". Label radios and checkboxes by their wrapping `<label>` text, and pick "Envío programado" (never Express or store pickup).
 - **Modal detection:** `[class*=modal-layout-0-x-paper], [role=dialog], [aria-modal=true]` with height > 50 px. While a modal is open, only collect controls inside it. Otherwise an agent clicks the page behind it and nothing happens.
 - **The cart updates asynchronously.** The orderForm reflects an Agregar 1–3 s later. Poll the cart API (we use up to 5 × 1 s) before deciding the add failed. Without polling, the agent adds a second product for the same item. That really happened with nuggets.
 - **Cart API** (from inside a store page):
