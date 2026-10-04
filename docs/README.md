@@ -36,13 +36,14 @@ Elsewhere in the repo:
   agent searches Día over MCP, builds a real cart, hands back a real cart link
         │
         ▼
-  Pagar → sign in with an email (Privy creates a Solana wallet)
+  Pagar → sign in with email or Google (Privy creates a Solana wallet)
         │
         ▼
   the server quotes the cart in USDC (live ARS/USD + 15% for envío)
         │
         ▼
-  one sponsored transaction: USDC ──► escrow vault (an Order account on chain)
+  one transaction, buyer-signed, fee paid by the resolver:
+  USDC ──► escrow vault (an Order account on chain)
         │
         ▼
   the server checks the order on chain, then the sandbox walks Día's

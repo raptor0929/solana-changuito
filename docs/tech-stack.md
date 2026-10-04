@@ -63,7 +63,7 @@ taught us why.
 |---|---|---|
 | **`@solana/kit`** | ^8.4.0 | RPC, transaction building and signing, client and server. The escrow client in `lib/escrow.ts` is hand-written against it: PDAs, instruction builders, `decodeOrder` — no generated IDL client |
 | **`@solana-program/token`**, **`/system`** | ^0.17.0, ^0.15.0 | ATA creation, `mintTo`, SOL transfer (the faucet) |
-| **`@privy-io/react-auth`** | 3.47.0 (exact) | email login, the embedded Solana wallet, and `signAndSendTransaction` with `sponsor: true` |
+| **`@privy-io/react-auth`** | 3.47.0 (exact) | email and Google login, the embedded Solana wallet, and `useSignTransaction` (sign only; the server sends `open` with the resolver as fee payer) |
 | **`jose`** | ^6.1.0 | verifies the Privy access token against the app's JWKS server-side. `@privy-io/node` is not used: it pins `@solana/kit` 5 |
 | **Anchor** | 0.32 (`anchor-lang`, `anchor-spl` with `token`) | the escrow program, `anchor/programs/changuito_escrow` |
 | **Platform tools** | v1.52 (`cargo build-sbf --tools-version v1.52`) | older ones cannot parse the edition-2024 crates in the dependency tree |
@@ -172,7 +172,7 @@ runtime with `MODULE_NOT_FOUND`.
 |---|---|
 | **Vercel** | the Next apps. Node runtime, `maxDuration = 300` on `/api/chat` — a basket is a dozen HTTPS round trips to a storefront |
 | **Railway** | `services/sandbox`, from its `Dockerfile` and `railway.json` (healthcheck `/health`, 1 replica) |
-| **Privy** | login, embedded wallets, devnet gas sponsorship |
+| **Privy** | login, embedded wallets (no gas sponsorship: the resolver pays the `open` fee) |
 | **Solana devnet RPC** | `https://api.devnet.solana.com` by default; `SOLANA_RPC_URL` / `NEXT_PUBLIC_SOLANA_RPC_URL` to use another |
 | **Solscan** | explorer links, `?cluster=devnet` |
 | **Upstash Redis** | provisioned through the Vercel Marketplace, which injects legacy KV-compatible names (`KV_REST_API_URL`, `KV_REST_API_TOKEN`) — so `Redis.fromEnv()` does *not* work and credentials are passed explicitly |
@@ -222,7 +222,7 @@ in `apps/web/.env.example`; setup in [`../DEPLOY.md`](../DEPLOY.md).
 | `NEXT_PUBLIC_PRIVY_APP_ID` | for login and checkout | the Privy app. Unset, the wallet widget renders disabled and nobody can sign in or pay; chat still works for guests |
 | `PRIVY_APP_SECRET` | for login | server-side lookup of the user's linked Solana wallet (`lib/privy-server.ts` returns no identity without it, so `/api/session/login` answers 401). The token itself is verified against Privy's public JWKS |
 | `CHG_SESSION_SECRET` | in production | signs the httpOnly `chg_user` cookie. Unset in production, login answers 503. Locally a dev constant stands in |
-| `SOLANA_RESOLVER_SECRET` | for faucet, settle, refund | the resolver keypair, as the 64-byte JSON array or base58. Checked against `DEPLOYMENTS.devnet.resolver` and refused on mismatch. Read at call time, so a build without it succeeds; the faucet answers 503 |
+| `SOLANA_RESOLVER_SECRET` | for faucet, `open` fees, settle, refund | the resolver keypair, as the 64-byte JSON array or base58. Checked against `DEPLOYMENTS.devnet.resolver` and refused on mismatch. Read at call time, so a build without it succeeds; the faucet answers 503 |
 | `SOLANA_RPC_URL`, `NEXT_PUBLIC_SOLANA_RPC_URL` | no | server and browser RPC. Default `https://api.devnet.solana.com`, which rate-limits; a dedicated devnet RPC is worth it on a public URL |
 | `SANDBOX_URL` | for real shopping in production | the Railway sandbox. Unset outside production, an in-process mock answers; unset in production, checkout cannot start (and refunds) unless `SANDBOX_MOCK=1` |
 | `SANDBOX_TOKEN` | with `SANDBOX_URL` | Bearer token; must equal the sandbox's own `SANDBOX_TOKEN` |
@@ -253,12 +253,13 @@ the only cluster, and it is a constant in the generated `lib/deployments.ts`.
 
 The app expects this configuration (dashboard.privy.io → your app):
 
-1. **Login methods:** email only. The provider also sets
-   `loginMethods: ['email']`, so other methods enabled in the dashboard are not
-   offered.
+1. **Login methods:** email and Google. The provider also sets
+   `loginMethods: ['email', 'google']`, so other methods enabled in the
+   dashboard are not offered.
 2. **Embedded wallets → Solana:** on, created on login for all users. Ethereum
    embedded wallets off.
-3. **Gas sponsorship:** enabled for **Solana devnet**. Without it,
-   `signAndSendTransaction({ sponsor: true })` fails and the lock step errors.
+3. **Gas sponsorship:** not needed. The wallet only signs `open`;
+   `/api/checkout/open` adds the resolver's signature as fee payer and sends
+   it, so the resolver needs devnet SOL instead.
 4. **Allowed origins:** `http://localhost:3124` and the production domain.
 5. **App ID** → `NEXT_PUBLIC_PRIVY_APP_ID`; **App secret** → `PRIVY_APP_SECRET`.

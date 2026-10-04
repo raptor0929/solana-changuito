@@ -71,7 +71,7 @@ flowchart TD
     A["#quot;armá un desayuno por menos de $10.000#quot;"] --> B["Agent searches Día over MCP<br/>live catalogue, live prices"]
     B --> C["A real cart, drawn as a card<br/>with the store's own cart link"]
     C --> D["Pagar → email login with Privy<br/><i>embedded Solana wallet, no seed phrase</i>"]
-    D --> E["Lock USDC in escrow<br/><i>gas sponsored by Privy</i>"]
+    D --> E["Lock USDC in escrow<br/><i>fee paid by the resolver</i>"]
     E --> F["Sandbox agent fills the same basket on Día<br/>login → cart → checkout → payment step"]
     F -->|reached payment| G["settle: vault → treasury<br/>¡Compra completada! + handoff link"]
     F -->|failed / lost| H["refund: vault → buyer"]
@@ -111,8 +111,8 @@ Full detail in **[docs/solana.md](docs/solana.md)**.
   - **`refund`**: the resolver can call it at any time; the buyer can call it after the deadline.
 - **The basket hash is what makes the escrow mean something.** The program will not settle unless the resolver presents the same canonical basket the buyer locked funds against. A server that wanted to charge for a different basket would need a different hash, and the program rejects that.
 - **The chain is the order book.** "Mis compras" is a `getProgramAccounts` query filtered by buyer. There is no orders table to drift from the money.
-- **Privy** handles the email login and the embedded Solana wallet. The app signs with `signAndSendTransaction({ sponsor: true })`, so the shopper needs no SOL for fees.
-- **The in-app faucet** sends one resolver-signed transaction: it creates the USDC account, mints 50 mock USDC, and tops up 0.01 SOL. Privy sponsors fees but not rent, so that SOL pays the order and vault rent. The vault's rent goes back to the buyer when it closes; the order account stays as the on-chain record.
+- **Privy** handles the email or Google login and the embedded Solana wallet. The wallet only signs. `/api/checkout/open` builds the `open` transaction with the **resolver as fee payer**, the wallet signs it as the buyer, and the server checks the bytes are exactly the ones it built, adds the resolver's signature and sends it. The shopper needs no SOL for fees.
+- **The in-app faucet** sends one resolver-signed transaction: it creates the USDC account, mints 50 mock USDC, and tops up 0.01 SOL. The resolver pays the fee but not the rent, so that SOL pays the order and vault rent (about 0.004 SOL). The vault's rent goes back to the buyer when it closes; the order account stays as the on-chain record.
 
 ### Verified on devnet
 
@@ -151,13 +151,13 @@ flowchart TB
     subgraph B["BROWSER"]
         CH["Chat<br/><i>SSE transcript, product grids, cart card</i>"]
         CM["CheckoutModal<br/><i>login · lock · shopping · done</i>"]
-        PV["Privy<br/><i>email login · embedded wallet · sponsored send</i>"]
+        PV["Privy<br/><i>email / Google login · embedded wallet · sign only</i>"]
     end
 
     subgraph N["NEXT.JS (Node runtime)"]
         CHAT["/api/chat<br/><i>Claude tool loop, streamed</i>"]
         MCP["MCP client ⇄ supermarket MCP server<br/><i>InMemoryTransport</i>"]
-        Q["/api/checkout/quote · start · status"]
+        Q["/api/checkout/quote · open · start · status"]
         F["/api/faucet · /api/balance"]
     end
 
@@ -174,8 +174,9 @@ flowchart TB
     CH --> CHAT --> MCP --> VTEX
     CHAT --> RD
     CH --> CM
-    CM --> PV -->|"open (sponsored)"| SOL
+    CM --> PV
     CM --> Q
+    Q -->|"open (buyer-signed, resolver pays fee)"| SOL
     Q -->|"verify order PDA"| SOL
     Q -->|"POST /jobs, poll"| SB --> VTEX
     Q -->|"settle / refund (resolver)"| SOL
@@ -185,7 +186,7 @@ flowchart TB
 **Trust boundaries:**
 
 - **The browser** holds the shopper's key (inside Privy) and signs exactly one thing: `open`.
-- **The server** holds the resolver key. That key can do only two things: settle to the treasury fixed at `initialize`, and only for the basket hash the buyer signed; or refund to the buyer.
+- **The server** holds the resolver key. On the escrow that key can do only two things: settle to the treasury fixed at `initialize`, and only for the basket hash the buyer signed; or refund to the buyer. It also pays the fee for each `open`, and co-signs only the exact message the server built for that quote.
 - **The sandbox** holds the store account's credentials and has no key at all. It reports a phase, and the server decides what that means.
 - **Before starting a job**, `/api/checkout/start` reads the order PDA from chain. Buyer, status, amount and basket hash must all match the quote. The browser's claim that it paid is never trusted.
 
@@ -207,8 +208,9 @@ Read this before the demo, not after it.
 - **Devnet only, with mock USDC.** The mint is ours and the faucet hands it out. Nothing in this branch touches mainnet.
 - **The 15% buffer goes to the treasury.** The quote is `ARS total ÷ rate × 1.15`, because envío is only known at checkout. On settle the whole amount moves, buffer included. A production version settles the exact amount and refunds the difference.
 - **The sandbox adds one unit per line**, and searches by product name only. It ignores `sku` and records `quantity` without applying it yet.
-- **The live sandbox does not reach checkout yet.** In a local run against Día (2026-10-04, the operator's real account) it logged in and emptied the cart, then looped in the first-add delivery modal and added 0 items. The unmodified upstream harness fails the same way, headed and headless, so the store's modal has drifted from the harness's notes. Fixing that is the next task.
-- **The sandbox is not deployed yet** at the time of writing. Locally, and in any deployment without `SANDBOX_URL`, a mock job steps through the same phases in about 20 seconds (`SANDBOX_MOCK_FAIL=1` makes it fail, to show the refund).
+- **The live sandbox reaches the payment step, verified end to end on a two-item basket.** `scripts/devnet-e2e.mts` against a local Docker sandbox and Día (2026-10-04, the operator's real account): resolver-paid `open`, login, empty cart, 2/2 items added, *Envío programado* chosen in the delivery modal, `/checkout/#/payment` reached in 214 seconds with 0 orders placed, then [settle](https://solscan.io/tx/3akyS29xEdce7Phd7TrVaPoTzxjWaf7Uum5Xn8g9nxgRafJZmvBgN28ahm94Yu8bzoQDtmR2G9L325RSPePearWP?cluster=devnet). Earlier runs looped in that modal: it now needs the *Envío programado* radio before *Confirmar* enables, and the harness had collapsed both delivery radios into one option. That fix is ours, not upstream's ([UPSTREAM.md](services/sandbox/UPSTREAM.md)). Search is by name, so a loose match can stand in for the requested product (in that run "Galletitas de avena 250g" became Galletitas Mantequitas 250 g). Larger baskets have not been run live.
+- **The sandbox is not deployed to Railway yet**; it runs locally in Docker. Without `SANDBOX_URL` (locally or deployed), a mock job steps through the same phases in about 20 seconds (`SANDBOX_MOCK_FAIL=1` makes it fail, to show the refund).
+- **The resolver hot key also pays every shopper's `open` fee**, about 0.00001 SOL each, so it has to be kept topped up with devnet SOL. Abuse is bounded: a quote needs a signed-in session, and the resolver co-signs only the one message built for that quote.
 - **The resolver is a single server key.** It cannot redirect funds, because the treasury and the basket hash are fixed, but it can choose *when* to settle a basket that matches. A multisig or an attestation from the sandbox is the obvious hardening.
 - **The program is upgradeable.** It is on the upgradeable loader with the deployer key (`2AF3x8xh…t15k`) as upgrade authority, so "no setter" is a property of today's code, not a guarantee. Freezing it (`solana program set-upgrade-authority --final`) is a one-line step before anything holds real money.
 - **No self-refund button yet.** The program lets the buyer refund after the deadline; the UI does not offer it, and a failed `/api/checkout/start` after `open` landed leaves the order waiting for that deadline.
@@ -277,11 +279,11 @@ Stated plainly, so nobody has to work it out from the commit history:
 
 - **`packages/mcp`** (supermercado-mcp: VTEX search and cart tools for Día, Carrefour, Disco and Jumbo) **predates the hackathon**. It was vendored into this repo when the repo started on 2026-09-12.
 - **changuito was first built on Stellar**: a Soroban escrow, the Pollar wallet, and a deposit-and-card payment rail. The chat agent, the cart UI and the MCP bridge come from that version.
-- **The sandbox harness** in `services/sandbox` comes from [`raptor0929/jev-dia-arg`](services/sandbox/UPSTREAM.md), credited in place. What is new here is the job server (`server.py`), the `run_job` API, and the deploy files.
+- **The sandbox harness** in `services/sandbox` comes from [`raptor0929/jev-dia-arg`](services/sandbox/UPSTREAM.md), credited in place. What is new here is the job server (`server.py`), the `run_job` API, the deploy files, and a fix for Día's delivery-type radios in `sandbox.py` and `agent.py`.
 - **New in this branch, for Crypto World's Fair:**
   - the Anchor escrow program and its devnet deployment;
   - the mock USDC mint and faucet;
-  - Privy login and gas sponsorship, replacing Pollar;
+  - Privy login, and `open` fees paid by the resolver, replacing Pollar;
   - the escrow-guarded checkout (`/api/checkout/*`, `CheckoutModal`), replacing the iframe and card flow;
   - the sandbox job service and the server's settle/refund logic;
   - the order history read from chain;
@@ -305,8 +307,8 @@ npm run dev            # http://localhost:3124
 | Variable | Needed for |
 |---|---|
 | `ANTHROPIC_API_KEY` | the agent (search, compare, cart). Enough on its own to try the chat |
-| `NEXT_PUBLIC_PRIVY_APP_ID` + `PRIVY_APP_SECRET` | login and wallet; the secret is needed server-side to look up the user's Solana wallet. The Privy app needs email login, Solana embedded wallets, devnet gas sponsorship, and `http://localhost:3124` as an allowed origin |
-| `SOLANA_RESOLVER_SECRET` | faucet, settle, refund. The resolver keypair (JSON byte array or base58) |
+| `NEXT_PUBLIC_PRIVY_APP_ID` + `PRIVY_APP_SECRET` | login and wallet; the secret is needed server-side to look up the user's Solana wallet. The Privy app needs email and Google login, Solana embedded wallets created on login, and `http://localhost:3124` as an allowed origin. Gas sponsorship is not used |
+| `SOLANA_RESOLVER_SECRET` | faucet, `open` fees, settle, refund. The resolver keypair (JSON byte array or base58) |
 | `CHG_SESSION_SECRET` | the session cookie. Required in production; a dev default is used locally |
 | `SANDBOX_URL` / `SANDBOX_TOKEN` | the real sandbox. Unset → mock job |
 | `ARS_PER_USD` | optional; pins the rate for a reproducible quote |

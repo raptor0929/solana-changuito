@@ -13,7 +13,7 @@ have those. Neither smoke signs in to completion, locks USDC, or presses
 **Cargar 50 USDC de prueba**.
 
 **The checkout is not covered here.** The browser checkout (Privy login, the
-sponsored lock, the sandbox phases, settle or refund) has no Playwright spec.
+resolver-paid lock, the sandbox phases, settle or refund) has no Playwright spec.
 It is exercised without a browser by `scripts/devnet-e2e.mts`, which drives the
 same routes against a dev server on devnet — see
 [judges.md](judges.md#5-verify-it-yourself).

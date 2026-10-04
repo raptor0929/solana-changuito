@@ -20,7 +20,24 @@ The harness is copied from **[raptor0929/jev-dia-arg](https://github.com/raptor0
 notes as [`services/sandbox/docs/dia-navigation.md`](../services/sandbox/docs/dia-navigation.md).
 What changuito added: `run_job()` in `agent.py` (the CLI's run as a callable
 returning a dict, with an `on_phase` callback), `server.py` (the job API), the
-`Dockerfile` and `railway.json`.
+`Dockerfile` and `railway.json` — and one fix to the harness itself, for Día's
+delivery modal (next section).
+
+### The delivery-type radios
+
+After the first add, Día's delivery modal asks for "Envío a domicilio" and then
+requires the **"Envío programado"** radio before `Confirmar` enables. Both
+radios share `name="DeliveryType"` and carry their text only in a wrapping
+`<label>`. Upstream `sandbox.py` named form fields by `name`, so the two radios
+deduped to one option called "DeliveryType", and Jev looped re-clicking
+"Envío a domicilio" with 0 items added; the unmodified upstream harness failed
+the same way. Now radios and checkboxes take their wrapping `<label>` text as
+their label (`COLLECT_JS` in `sandbox.py`), and the `shop` instruction in
+`agent.py` says to select Envío programado (never Express or store pickup),
+then Confirmar. With that, a two-item escrow run against a local Docker sandbox (2026-10-04)
+reached `/checkout/#/payment` in 214 s, with 0 orders placed, and
+[settled](https://solscan.io/tx/3akyS29xEdce7Phd7TrVaPoTzxjWaf7Uum5Xn8g9nxgRafJZmvBgN28ahm94Yu8bzoQDtmR2G9L325RSPePearWP?cluster=devnet). The field note is
+in [`dia-navigation.md`](../services/sandbox/docs/dia-navigation.md) §4.
 
 ## How it works
 
@@ -207,9 +224,10 @@ reconciles them after the handoff.
   basket that did reach payment just before the restart is refunded too.
 - **One account, one replica.** `railway.json` pins `numReplicas: 1`; scaling
   out would give each replica its own queue on the same account.
-- **Not deployed yet.** The Railway service is configured but awaits
-  credentials, and the Docker image has not been built locally. The devnet
-  e2e evidence in [solana.md](solana.md#evidence-transactions) used the
+- **Not deployed to Railway yet.** The service is configured but awaits
+  credentials; it runs locally in Docker, where a one-item run reached the
+  payment step. Larger baskets have not been run live. The devnet e2e
+  evidence in [solana.md](solana.md#evidence-transactions) used the
   in-process mock.
 - **Live-site dependency.** Selectors, hosts and the Flutter login popup are
   Día's to change; the field notes are a map, not a contract.

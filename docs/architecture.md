@@ -43,7 +43,7 @@ What this demo does **not** do, stated up front:
 flowchart TB
     subgraph BROWSER["Browser"]
         direction TB
-        PRIVY["Privy<br/><i>email login · Solana embedded wallet<br/>signAndSendTransaction sponsor:true</i>"]
+        PRIVY["Privy<br/><i>email / Google login · Solana embedded wallet<br/>signTransaction only, no send</i>"]
         CHAT["Chat + chat-state.ts<br/><i>SSE transcript, grids, cart card</i>"]
         CM["CheckoutModal<br/><i>login → review/lock → shopping → done | refunded</i>"]
         LS[("localStorage<br/><i>the transcript the shopper sees</i>")]
@@ -54,7 +54,7 @@ flowchart TB
         API_CHAT["/api/chat<br/><i>agent loop, streamed as SSE</i>"]
         MCPC["MCP Client ⇄ McpServer<br/><i>InMemoryTransport</i>"]
         API_SES["/api/session/login<br/><i>Privy JWT → chg_user cookie</i>"]
-        API_CK["/api/checkout/quote · start · status · orders"]
+        API_CK["/api/checkout/quote · open · start · status · orders"]
         API_FAU["/api/faucet · /api/balance"]
         RES["resolver key<br/><i>lib/server/resolver.ts</i>"]
     end
@@ -76,11 +76,12 @@ flowchart TB
     PRIVY -->|"access token"| API_SES
     CHAT --> CM
     CM -->|"quote, start, poll every 3s"| API_CK
-    PRIVY -->|"open (buyer-signed, fee sponsored)"| SOL
+    CM -->|"open: unsigned tx out, buyer-signed tx back"| API_CK
+    CM -.->|"sign open"| PRIVY
     API_CK <--> REDIS
     API_CK -->|"read Order PDA"| SOL
     API_CK -->|"POST /jobs · GET /jobs/:id"| SBX --> DIA
-    API_CK --> RES -->|"settle | refund"| SOL
+    API_CK --> RES -->|"open (fee payer) | settle | refund"| SOL
     API_FAU --> RES -->|"mint USDC + 0.01 SOL"| SOL
 ```
 
@@ -90,7 +91,8 @@ flowchart TB
 
 ### Login is Privy; the session is still ours
 
-Privy does email login and creates a Solana embedded wallet on first login.
+Privy does email or Google login and creates a Solana embedded wallet on first
+login. The wallet only signs; it never sends (see [the resolver pays the fee](#the-resolver-pays-the-fee-for-open-and-signs-only-what-it-built)).
 The server never trusts the browser's claim of an address: `POST
 /api/session/login` takes the Privy access token, verifies it with `jose`
 against Privy's JWKS (`lib/privy-server.ts`, `lib/session-issue.ts`), fetches
@@ -128,6 +130,24 @@ link. Losing it is survivable — see [failure modes](#failure-modes).
 the Order PDA exists, its buyer is the cookie's wallet, it is open, it locks at
 least the quoted amount, and it commits to the quoted basket hash. The server
 believes the chain, not the browser.
+
+### The resolver pays the fee for `open`, and signs only what it built
+
+The shopper's wallet has USDC and a little SOL for rent, not for fees, and
+Privy's gas sponsorship is not used. So `/api/checkout/open` does it in two
+calls. `POST {orderId}` builds the v0 `open` transaction with the resolver as
+fee payer (`lib/checkout/open-tx.ts`), stores its message bytes on the checkout
+record (`openMessage`) and returns it unsigned. The wallet signs it as the
+buyer (`signTransaction`, no send). `PUT {orderId, tx}` refuses anything whose
+message bytes are not exactly the stored ones, or whose buyer signature does
+not verify, then adds the resolver's signature, sends, waits for confirmation
+and records `openSig`.
+
+The exact-bytes check is the point: a key that pays fees must never co-sign
+whatever the browser hands it. Rent does not move — the program still has
+`payer = buyer` for the order and vault accounts — so only the fee (two
+signatures, about 0.00001 SOL) is the resolver's, and the resolver has to stay
+topped up with devnet SOL.
 
 ### Settle and refund happen on poll, not in the background
 
@@ -179,7 +199,7 @@ shopper. Everything else is in [`../CLAUDE.md`](../CLAUDE.md).
 | Key | Held by | Can | Cannot |
 |---|---|---|---|
 | Buyer wallet | the shopper, via Privy's embedded wallet | sign `open` (lock own USDC); `refund` own order **after** its deadline | settle; refund before the deadline; touch another buyer's order |
-| Resolver (`AgTnHC…yqQ5`) | the Next.js server (`SOLANA_RESOLVER_SECRET`) | `settle` an open order **to the configured treasury**; `refund` an open order **to the buyer** at any time; mint mock USDC (it is the mint authority) | send escrowed USDC anywhere else; settle against a different basket than was opened; close an order twice |
+| Resolver (`AgTnHC…yqQ5`) | the Next.js server (`SOLANA_RESOLVER_SECRET`) | `settle` an open order **to the configured treasury**; `refund` an open order **to the buyer** at any time; mint mock USDC (it is the mint authority); pay the fee for `open`, co-signing only the message the server built for that quote | send escrowed USDC anywhere else; settle against a different basket than was opened; close an order twice |
 | Program upgrade authority (`2AF3x8…t15k`, the deployer) | the developer's machine | redeploy the program (standard upgradeable loader) | — this is the one key that could change the rules; it is not frozen on devnet |
 | `PRIVY_APP_SECRET` | the Next.js server | look up a verified user's linked wallets (Privy REST, basic auth) | sign anything on chain; the token itself is verified against Privy's public JWKS |
 | `SANDBOX_TOKEN` | web server + sandbox | start and read sandbox jobs | move any money |
@@ -216,8 +236,14 @@ sequenceDiagram
     B->>A: POST /quote {cart, handoffUrl}
     A->>R: store quote (24h TTL)
     A-->>B: orderId, amount, basketHash, timeoutSecs=3600
-    B->>B: build v0 `open` tx (lib/checkout/open-tx.ts)
-    B->>S: signAndSendTransaction(sponsor:true)<br/>USDC buyer → vault PDA
+    B->>A: POST /open {orderId}
+    A->>R: store openMessage (fee payer = resolver)
+    A-->>B: unsigned v0 `open` tx (lib/checkout/open-tx.ts)
+    B->>B: Privy signTransaction (buyer, no send)
+    B->>A: PUT /open {orderId, tx}
+    A->>A: message bytes = openMessage? buyer sig valid?
+    A->>S: add resolver sig, send<br/>USDC buyer → vault PDA
+    A-->>B: openSig
     B->>A: POST /start {orderId, openSig}
     A->>S: read Order PDA (retries up to 4×1.5s)
     A->>A: buyer = cookie? open? amount ≥ quote? hash = quote?
@@ -264,12 +290,13 @@ is kept as the on-chain record. A second close fails with `OrderClosed`.
 | Sandbox restarted (jobs are in memory) | `GET /jobs/{id}` → 404 → read as `failed` → refund | back with the buyer |
 | Sandbox job fails (login, item not found, checkout stuck, max steps) | status `failed` → refund, error copied to the record | back with the buyer |
 | `SANDBOX_URL` unset in production and `SANDBOX_MOCK` ≠ 1 | sandbox mode is `off`; start records no job; next poll refunds | back with the buyer |
-| Order not yet visible to the RPC node at `/start` (or any other `/start` rejection after `open` landed) | 4 retries 1.5s apart, then 409 "Todavía no vemos el pago en la red"; the dialog returns to review with the error. No job is recorded, so `/status` reports `quoted` and never refunds; pressing lock again re-sends `open` for the same `order_id`, which the program rejects because the account exists | in the vault; only the buyer's self-refund after the 1h deadline recovers it (no UI for that yet) |
+| Order not yet visible to the RPC node at `/start` (or any other `/start` rejection after `open` landed) | 4 retries 1.5s apart, then 409 "Todavía no vemos el pago en la red"; the dialog returns to review with the error. No job is recorded, so `/status` reports `quoted` and never refunds; pressing lock again is refused by `/api/checkout/open` (409, the record already has `openSig`) | in the vault; only the buyer's self-refund after the 1h deadline recovers it (no UI for that yet) |
 | Public devnet RPC answers 429 | confirmation polling (`waitFor`) treats a failed status call as a pause, up to 60s; a failed settle/refund leaves the order open and the next poll retries | in the vault until a poll succeeds |
 | Two polls arrive together (two tabs, retries) | per-instance `closing` set; chain status read before every close; the program rejects a second close with `OrderClosed`, which the route catches and reports on the next poll | closed exactly once |
 | Shopper closes the tab mid-job | the sandbox job keeps running, but **nothing settles or refunds until someone polls `/status` for that order** (reopening the checkout, or the buyer's self-refund after the 1h deadline) | in the vault |
 | Checkout record expires (Redis 24h TTL) or Redis is not configured on a multi-instance deploy | `/status` returns 404; the server can no longer close the order | in the vault; only the buyer's self-refund after the deadline recovers it |
-| Resolver key missing or mismatched | `resolverSigner` refuses by name; faucet returns 503; settle/refund throw and the order stays open | in the vault |
+| Resolver key missing or mismatched | `resolverSigner` refuses by name; faucet returns 503; `open` cannot be sent (502, nothing locked); settle/refund throw and the order stays open | in the vault, or still with the buyer if `open` never went out |
+| Resolver out of SOL | `open` fails at send (502, "No pudimos bloquear el pago"); settle/refund fail and retry on the next poll | still with the buyer, or in the vault until the resolver is topped up |
 | Price or envío differs at Día | not reconciled: the 15% buffer is the only cushion, and the whole locked amount goes to the treasury on settle | treasury |
 
 ---
@@ -288,7 +315,7 @@ changuito/
 │       ├── agent/           loop, prompt, render-tools, turn-store, early-ask
 │       ├── mcp/             boot (in-memory transport), bridge, session
 │       ├── checkout/        sandbox client + mock, escrow-server (resolver
-│       │                      side), open-tx (browser side), store (Redis)
+│       │                      side), open-tx (built server-side for /open), store (Redis)
 │       ├── server/          the resolver key — server-only
 │       ├── escrow.ts        hand-written @solana/kit client: PDAs, ixs, decode
 │       ├── solana.ts        RPC, send + confirm, Solscan links, units

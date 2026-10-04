@@ -21,7 +21,7 @@ read one section. It states what is simulated, by us, before you find it.
 | **What is on-chain** | an Anchor escrow: the shopper locks USDC, the backend resolver settles it to a treasury or refunds it. Every order is an account you can read |
 | **Program** | `changuito_escrow` [`9A2PXJaf…B2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet) — Anchor 0.32, source in [`anchor/programs/changuito_escrow`](../anchor/programs/changuito_escrow) |
 | **USDC** | our own devnet mint, 6 decimals, [`9rYNCiaa…tAtdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet). The resolver is its mint authority; the in-app faucet hands out 50 at a time |
-| **Wallet** | Privy (`@privy-io/react-auth` 3.47.0): email login creates an embedded Solana wallet; transaction fees are sponsored by Privy, so a shopper needs no prior wallet and no SOL for fees |
+| **Wallet** | Privy (`@privy-io/react-auth` 3.47.0): email or Google login creates an embedded Solana wallet that only signs. The server's resolver key pays the `open` fee and co-signs only the exact transaction it built, so a shopper needs no prior wallet and no SOL for fees |
 | **Pitch video** | sources in [`creatives/`](../creatives) (Remotion). No hosted link in this repo — `npm run render` in any of those folders produces the mp4 |
 
 ## 1. The one-paragraph version
@@ -43,7 +43,7 @@ outcome is a devnet transaction the shopper gets a Solscan link for.
 | Minutes | Do this | What it shows |
 |---|---|---|
 | 0–3 | Run the app locally ([§5](#5-verify-it-yourself)) and ask for a basket in Spanish — *"armá un desayuno por menos de $10.000"* | The agent is driving a real store. Prices and stock are Día's, live |
-| 3–6 | Press *Pagar*: **Entrar → Bloquear USDC → Comprar**. Sign in with an email, press *Cargar 50 USDC de prueba*, lock | Privy login, a sponsored `open` transaction, then the shopping phases ticking by. Ends in *¡Compra completada!* with Solscan links for *Bloqueo* and *Liberación* |
+| 3–6 | Press *Pagar*: **Entrar → Bloquear USDC → Comprar**. Sign in with an email, press *Cargar 50 USDC de prueba*, lock | Privy login, an `open` transaction the buyer signs and the resolver pays the fee for, then the shopping phases ticking by. Ends in *¡Compra completada!* with Solscan links for *Bloqueo* and *Liberación* |
 | 6–9 | Read [`anchor/programs/changuito_escrow/src/lib.rs`](../anchor/programs/changuito_escrow/src/lib.rs) | The whole money rail: `initialize`, `open`, `settle`, `refund`. One file |
 | 9–12 | Read [`apps/web/app/api/checkout/`](../apps/web/app/api/checkout/) — `quote`, `start`, `status` | How the server refuses to start shopping until the chain says the order is funded, and how it decides settle vs refund |
 | 12–15 | Run `scripts/devnet-e2e.mts` ([§5](#5-verify-it-yourself)) | Both paths end to end on devnet, without a browser, printing Solscan links |
@@ -77,11 +77,11 @@ being told.
 | The supermarket catalogue and cart | **Real.** Día's own API, live prices and stock |
 | The escrow, the lock, settle and refund | **Real, on devnet.** Every step is a transaction with a link |
 | The USDC | **Our own devnet mint**, handed out by the in-app faucet. Not Circle's USDC, no value |
-| Gas | **Sponsored by Privy** for fees. Rent is not sponsored: the faucet also sends 0.01 SOL when the wallet is below 0.006, which covers the ~0.004 SOL of rent for the order and vault accounts |
+| Gas | **Fees paid by the resolver** (a server hot key, so it must be kept topped up with devnet SOL). Rent is the buyer's: the faucet also sends 0.01 SOL when the wallet is below 0.006, which covers the ~0.004 SOL of rent for the order and vault accounts |
 | **A placed order at Día** | **Not done.** The sandbox walks the real checkout with the basket and **stops at the payment step**. Card entry is out of scope. Settle means "the agent proved it could get this basket to checkout"; the shopper finishes at Día through their own cart link |
 | Where settled USDC goes | **To a treasury we hold**, which does not pay Día. The 15% FX buffer (for envío, only known at checkout) goes with it. A demo simplification |
 | The checkout robot | **Runs on one operator Día account**, one job at a time, jobs held in memory. It adds one unit per line (quantity is recorded, not applied yet) and searches by name |
-| Sandbox deployment | **Not deployed yet.** Locally and on any build without `SANDBOX_URL`, an in-process mock plays the phases (0/4/7/15/20 s). The settle/refund transactions above were produced against the mock |
+| Sandbox deployment | **Not deployed to Railway yet.** It runs locally in Docker, and a two-item escrow run against Día reached the payment step (214 s, 0 orders placed) and [settled](https://solscan.io/tx/3akyS29xEdce7Phd7TrVaPoTzxjWaf7Uum5Xn8g9nxgRafJZmvBgN28ahm94Yu8bzoQDtmR2G9L325RSPePearWP?cluster=devnet). On any build without `SANDBOX_URL`, an in-process mock plays the phases (0/4/7/15/20 s). The other settle/refund transactions above were produced against the mock |
 
 ### What is not done, as a list
 
@@ -174,9 +174,10 @@ outcome is known, and the only two exits are to the treasury for the basket that
 was locked, or back to the buyer.
 
 **Why Privy?**
-A grocery shopper does not have a wallet. Email login creates one, and
-sponsored fees mean the first transaction does not need SOL bought somewhere
-else. The faucet covers the rent that sponsorship does not.
+A grocery shopper does not have a wallet. Email or Google login creates one.
+The resolver pays the fee for `open`, so the first transaction does not need
+SOL bought somewhere else, and it co-signs only the exact message the server
+built for that quote. The faucet covers the rent, which stays the buyer's.
 
 **Is the AI load-bearing, or decoration?**
 Load-bearing, and constrained: the model decides *which* products to surface and

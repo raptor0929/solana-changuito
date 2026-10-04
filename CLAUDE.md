@@ -358,6 +358,16 @@ half, `CheckoutModal.tsx` the browser half.
 - **`/api/checkout/start` reads the order PDA from chain before it starts a job**:
   buyer, status, amount and basket hash against the quote. A signature from
   the browser is a hint, not proof.
+- **`open` is the buyer's signature and the resolver's fee.** Privy's gas
+  sponsorship is not used. `/api/checkout/open` builds the transaction with the
+  resolver as fee payer and keeps its message bytes on the checkout record
+  (`openMessage`); the wallet signs as buyer and does not send; the `PUT`
+  co-signs and sends only if the bytes that come back are **exactly** the ones
+  stored and the buyer's signature verifies. A key that pays fees must never
+  sign whatever a browser hands it — so do not relax that to "decodes to an
+  `open` for this order". Rent stays the buyer's (`payer = buyer` in the
+  program), which is why the faucet still sends SOL. The cost is that the
+  resolver hot key now pays every shopper's fee and must be kept in devnet SOL.
 - **Settle and refund check on-chain status first.** Polls overlap; the
   program rejects a second close anyway, but a failed transaction is a red
   line in the UI for nothing.

@@ -12,7 +12,7 @@ Explorer links use Solscan with `?cluster=devnet`.
 | Program `changuito_escrow` (Anchor 0.32) | [`9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet) |
 | Config PDA `["config"]` | [`BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ`](https://solscan.io/account/BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ?cluster=devnet) |
 | Mock USDC mint (6 decimals, authority = resolver) | [`9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet) |
-| Resolver (settles, refunds, mints faucet USDC) | [`AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5`](https://solscan.io/account/AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5?cluster=devnet) |
+| Resolver (settles, refunds, mints faucet USDC, pays `open` fees) | [`AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5`](https://solscan.io/account/AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5?cluster=devnet) |
 | Treasury (owner) | [`EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS`](https://solscan.io/account/EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS?cluster=devnet) |
 | Treasury USDC token account | [`HVsDJbwmsa2oTUpddQMSSUzKF6Z4PvQRU96d7n95owxa`](https://solscan.io/account/HVsDJbwmsa2oTUpddQMSSUzKF6Z4PvQRU96d7n95owxa?cluster=devnet) |
 | Program upgrade authority (deployer) | [`2AF3x8xhFfGaLHf5CPX7YZyS5aywQkNfu51gV1Sjt15k`](https://solscan.io/account/2AF3x8xhFfGaLHf5CPX7YZyS5aywQkNfu51gV1Sjt15k?cluster=devnet) |
@@ -118,6 +118,10 @@ The resolver is a hot key on the web server. The program limits it to:
 - refund an open order, **only into a token account whose authority is the
   order's buyer**.
 
+Outside the program, it is also the fee payer for every `open`, and co-signs
+only the exact message the server built for that order (see
+[Wallet](#wallet-privy-embedded-wallet-resolver-paid-fees)).
+
 It cannot pick a destination, cannot change config, and cannot close an order
 twice. Its realistic abuse is settling an order whose basket did not reach
 checkout, or refunding early. The buyer does not depend on it to get money
@@ -137,7 +141,7 @@ routes and `scripts/solana-init.mts` share it.
 
 | Caller | File | Does |
 |---|---|---|
-| Browser | `lib/checkout/open-tx.ts` | builds a v0 `open` transaction, buyer as fee payer, for Privy to sign |
+| Server | `lib/checkout/open-tx.ts` | builds a v0 `open` transaction, resolver as fee payer, for the buyer's Privy wallet to sign (`/api/checkout/open`) |
 | Server | `lib/checkout/escrow-server.ts` | `readOrder`, `settleOrder`, `refundOrder` (resolver-signed), `ordersOf` (purchases list) |
 | Server | `lib/solana.ts` | `sendIxs`: sign, send, then poll `getSignatureStatuses` until confirmed (no websockets in serverless; a 429 is treated as a pause) |
 
@@ -146,24 +150,50 @@ routes and `scripts/solana-init.mts` share it.
 the buyer at offset 40. `GET /api/checkout/orders` serves it; there is no
 orders table.
 
-## Wallet: Privy embedded wallet, sponsored fees
+## Wallet: Privy embedded wallet, resolver-paid fees
 
-- Login is Privy email (`@privy-io/react-auth` 3.47). A Solana embedded wallet
-  is created on first login.
-- The browser signs `open` with `signAndSendTransaction` and
-  `options: { sponsor: true }` (`components/WalletProvider.tsx`). Privy's native
-  gas sponsorship pays the **transaction fee**.
-- Privy does **not** pay **rent**. `open` creates two accounts, both paid by the
-  buyer: the Order (163 bytes, ≈0.00203 SOL) and the vault (165-byte token
-  account, ≈0.00204 SOL). On settle or refund the **vault** is closed and its
-  rent returns to the buyer; the **Order** account is kept as the on-chain
-  receipt, so its ≈0.002 SOL stays locked per order.
+- Login is Privy email or Google (`@privy-io/react-auth` 3.47,
+  `loginMethods: ['email', 'google']`). A Solana embedded wallet is created on
+  first login.
+- The wallet **only signs**: `wallet.signTransaction` (Privy
+  `useSignTransaction`, `components/WalletProvider.tsx`, `lib/use-wallet.ts`),
+  no send. Privy gas sponsorship is not used.
+- The **resolver pays the transaction fee** for `open`, in two calls to
+  `/api/checkout/open` (`app/api/checkout/open/route.ts`):
+  1. `POST {orderId}` builds the v0 `open` with `feePayer = resolver`
+     (`lib/checkout/open-tx.ts`), stores its base64 message bytes on the
+     checkout record as `openMessage`, and returns the transaction unsigned.
+  2. The browser signs it as the buyer and sends `PUT {orderId, tx}`. The
+     server refuses it unless the message bytes equal `openMessage` exactly
+     and the buyer's ed25519 signature verifies, then adds the resolver's
+     signature (`partiallySignTransaction`), sends, waits for confirmation and
+     stores `openSig`.
+
+  **The exact-bytes check is the rule.** A key that pays fees must never
+  co-sign arbitrary bytes from the browser; it signs only the one message it
+  built for that quote.
+- The resolver does **not** pay **rent**: the program has `payer = buyer` for
+  both accounts `open` creates, the Order (163 bytes, ≈0.00203 SOL) and the
+  vault (165-byte token account, ≈0.00204 SOL). On settle or refund the
+  **vault** is closed and its rent returns to the buyer; the **Order** account
+  is kept as the on-chain receipt, so its ≈0.002 SOL stays locked per order.
 - To cover that, the faucet sends 0.01 SOL along with the USDC whenever the
   wallet holds less than 0.006 SOL.
 
-Privy dashboard settings the app needs: email login, Solana embedded wallets
-(create on login), gas sponsorship for Solana devnet, and allowed origins
-(`http://localhost:3124` plus the production domain).
+Verified on devnet: [`DRzvSuVN…NoCgrSfWA`](https://solscan.io/tx/DRzvSuVNZQXwQWYkMyDpU9s8ApkHHjjPwK7XkLdRFRzq5PBSZTdCdqTHPnhcCdHSXa42mGfQCHS5wfNoCgrSfWA?cluster=devnet)
+is an `open` with the resolver as fee payer; the buyer went from 0.01 to
+0.00703328 SOL, which is rent only.
+
+**The trade-off.** The resolver hot key now also pays every shopper's `open`
+fee (two signatures, ≈0.00001 SOL), so it has to be kept topped up with
+devnet SOL; when it runs dry, nobody can lock. Abuse is bounded: a quote
+needs a signed-in session, and the resolver co-signs only the message built
+for that quote.
+
+Privy dashboard settings the app needs: email and Google login, Solana
+embedded wallets (create on login), and allowed origins
+(`http://localhost:3124` plus the production domain). Gas sponsorship is not
+needed.
 
 ## Faucet (mock USDC)
 

@@ -26,14 +26,16 @@ Devnet only. There is no mainnet configuration and no network switch.
 
 In the Privy dashboard, for the app whose id you will use:
 
-1. **Login methods → Email** on. The provider also passes
-   `loginMethods: ['email']`, so anything else enabled there is not offered.
+1. **Login methods → Email** and **Google** on. The provider also passes
+   `loginMethods: ['email', 'google']`, so anything else enabled there is not
+   offered.
 2. **Embedded wallets → Solana** on, **create on login for all users**.
    Ethereum embedded wallets off.
-3. **Gas sponsorship → Solana devnet** on. The app sends the `open`
-   transaction with `signAndSendTransaction({ sponsor: true })`; without
-   sponsorship it fails and the lock step shows an error. Sponsorship pays
-   **fees, not rent** — the faucet sends 0.01 SOL with the test USDC for that.
+3. **Gas sponsorship** is not needed; leave it off. The wallet only signs
+   `open`: `/api/checkout/open` builds it with the resolver as fee payer, adds
+   the resolver's signature and sends it. So the **resolver needs devnet SOL**
+   for those fees (about 0.00001 SOL each). Rent is still the buyer's — the
+   faucet sends 0.01 SOL with the test USDC for that.
 4. **Allowed origins:** `http://localhost:3124` and every domain you deploy to
    (production and, if you use them, Vercel preview URLs).
 5. Copy the **App ID** and **App secret**.
@@ -232,7 +234,7 @@ All keys live in **`~/.config/solana/changuito/`** and are **never committed**:
 |---|---|
 | `deployer.json` | pays for the deploy and `initialize`; the smoke run's buyer |
 | `program.json` | the program's address keypair |
-| `resolver.json` | signs settle, refund and faucet mints; the mint authority. Its contents become `SOLANA_RESOLVER_SECRET` |
+| `resolver.json` | signs settle, refund and faucet mints, and pays the fee for every shopper's `open`; the mint authority. Its contents become `SOLANA_RESOLVER_SECRET` |
 | `treasury.json` | where settled USDC lands. The app never signs for it |
 
 ```bash
@@ -245,7 +247,8 @@ solana airdrop 5 $(solana-keygen pubkey ~/.config/solana/changuito/deployer.json
 
 If the airdrop is rate-limited, transfer devnet SOL from another funded wallet,
 or use the web faucet. The resolver also needs a little SOL: it pays fees for
-settle, refund and the faucet, and the faucet's 0.01 SOL top-ups.
+`open`, settle, refund and the faucet, and the faucet's 0.01 SOL top-ups.
+Every checkout draws on it, so check its balance before a demo.
 
 ### 3.3 A new copy needs code edits first
 

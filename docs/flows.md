@@ -146,8 +146,13 @@ sequenceDiagram
   participant D as Día
   B->>API: POST /api/checkout/quote { cart, handoffUrl }
   API-->>B: orderId, amount, basketHash, timeoutSecs 3600, programId, usdcMint
-  B->>B: build v0 `open` tx (lib/checkout/open-tx.ts)
-  B->>C: Privy signAndSendTransaction(sponsor: true)
+  B->>API: POST /api/checkout/open { orderId }
+  API-->>B: unsigned v0 `open` tx, fee payer = resolver (lib/checkout/open-tx.ts)
+  B->>B: Privy signTransaction (buyer signs, no send)
+  B->>API: PUT /api/checkout/open { orderId, tx }
+  API->>API: bytes = stored openMessage? buyer signature valid?
+  API->>C: add resolver signature, send, confirm
+  API-->>B: openSig
   Note over C: USDC buyer → vault PDA ["vault", order_id]<br/>Order PDA ["order", order_id] created
   B->>API: POST /api/checkout/start { orderId, openSig }
   API->>C: read Order PDA: buyer, status, amount, basket_hash
@@ -196,9 +201,16 @@ timeout    = 3600s
 
 ### 3b. The lock
 
-The browser builds the `open` transaction with the buyer as fee payer and
-hands the bytes to Privy with `sponsor: true`. **Privy pays the fee. It does
-not pay rent**: `open` creates the Order account and the vault token account,
+`POST /api/checkout/open` builds the `open` transaction with the **resolver**
+as fee payer, stores its message bytes on the checkout record (`openMessage`)
+and returns it unsigned. The browser has Privy sign it as the buyer — sign
+only, no send — and hands it back with `PUT`. The server refuses it unless
+the message bytes are exactly the stored ones and the buyer's ed25519
+signature verifies, because a key that pays fees must never co-sign arbitrary
+bytes from a browser. Then it adds the resolver's signature, sends, waits for
+confirmation and returns `openSig`.
+
+**The resolver pays the fee. It does not pay rent**: `open` creates the Order account and the vault token account,
 about 0.004 SOL between them, and the buyer pays that — which is why the
 faucet sends 0.01 SOL with the USDC (flow 5). The vault's rent comes back to
 the buyer when it closes; the Order account stays on chain as the record.
@@ -358,8 +370,8 @@ resolver-signed transaction:
                                  { usdc, usdcDisplay, txHash, created }
 ```
 
-- **The SOL is rent, not fees.** Privy sponsors fees; it does not pay for the
-  accounts `open` creates. Without the SOL a fresh wallet holds USDC and
+- **The SOL is rent, not fees.** The resolver pays the `open` fee; it does
+  not pay for the accounts `open` creates. Without the SOL a fresh wallet holds USDC and
   cannot open an order with it. One transaction means a shopper never ends up
   with one and not the other.
 - The policy is pure and tested (`lib/faucet-policy.ts`): grant 50, stop at
