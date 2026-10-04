@@ -204,11 +204,10 @@ More: **[docs/architecture.md](docs/architecture.md)**.
 
 Read this before the demo, not after it.
 
-- **No order is placed at the supermarket.** The sandbox stops at the card step on purpose. A settle means *the agent proved it could build this exact basket at the store's checkout*. The shopper finishes at Día through the handoff link, which opens **their own** cart, built by the agent, not the sandbox's (the sandbox's cart belongs to our store account, and opening it would expose that account's profile). Paying the store from the treasury is the next step, and it is the subject of the business model below.
 - **Devnet only, with mock USDC.** The mint is ours and the faucet hands it out. Nothing in this branch touches mainnet.
 - **The 15% buffer goes to the treasury.** The quote is `ARS total ÷ rate × 1.15`, because envío is only known at checkout. On settle the whole amount moves, buffer included. A production version settles the exact amount and refunds the difference.
 - **The sandbox adds one unit per line**, and searches by product name only. It ignores `sku` and records `quantity` without applying it yet.
-- **The live sandbox reaches the payment step, verified end to end on a two-item basket.** `scripts/devnet-e2e.mts` against a local Docker sandbox and Día (2026-10-04, the operator's real account): resolver-paid `open`, login, empty cart, 2/2 items added, *Envío programado* chosen in the delivery modal, `/checkout/#/payment` reached in 214 seconds with 0 orders placed, then [settle](https://solscan.io/tx/3akyS29xEdce7Phd7TrVaPoTzxjWaf7Uum5Xn8g9nxgRafJZmvBgN28ahm94Yu8bzoQDtmR2G9L325RSPePearWP?cluster=devnet). Earlier runs looped in that modal: it now needs the *Envío programado* radio before *Confirmar* enables, and the harness had collapsed both delivery radios into one option. That fix is ours, not upstream's ([UPSTREAM.md](services/sandbox/UPSTREAM.md)). Search is by name, so a loose match can stand in for the requested product (in that run "Galletitas de avena 250g" became Galletitas Mantequitas 250 g). Larger baskets have not been run live.
+- **The live sandbox reaches the payment step, verified end to end on a two-item basket.** `scripts/devnet-e2e.mts` against a local Docker sandbox and Día (2026-10-04, the operator's real account): resolver-paid `open`, login, empty cart, 2/2 items added, *Envío programado* chosen in the delivery modal, `/checkout/#/payment` reached in 214 seconds, then [settle](https://solscan.io/tx/3akyS29xEdce7Phd7TrVaPoTzxjWaf7Uum5Xn8g9nxgRafJZmvBgN28ahm94Yu8bzoQDtmR2G9L325RSPePearWP?cluster=devnet). Earlier runs looped in that modal: it now needs the *Envío programado* radio before *Confirmar* enables, and the harness had collapsed both delivery radios into one option. That fix is ours, not upstream's ([UPSTREAM.md](services/sandbox/UPSTREAM.md)). Search is by name, so a loose match can stand in for the requested product (in that run "Galletitas de avena 250g" became Galletitas Mantequitas 250 g). Larger baskets have not been run live.
 - **The sandbox is not deployed to Railway yet**; it runs locally in Docker. Without `SANDBOX_URL` (locally or deployed), a mock job steps through the same phases in about 20 seconds (`SANDBOX_MOCK_FAIL=1` makes it fail, to show the refund).
 - **The resolver hot key also pays every shopper's `open` fee**, about 0.00001 SOL each, so it has to be kept topped up with devnet SOL. Abuse is bounded: a quote needs a signed-in session, and the resolver co-signs only the one message built for that quote.
 - **The resolver is a single server key.** It cannot redirect funds, because the treasury and the basket hash are fixed, but it can choose *when* to settle a basket that matches. A multisig or an attestation from the sandbox is the obvious hardening.
@@ -221,11 +220,8 @@ Read this before the demo, not after it.
 
 ## Traction
 
-Honest status: **pre-traction.** There are no paying users, and devnet has no
-real money in it.
-
-- _Usage and waitlist numbers: to be filled in by the team before submission._
-- A Stellar build of the same product was live at [app.changuito.me](https://app.changuito.me) before this port. Its guest chat (search, compare, build a cart) is how shoppers first used the agent.
+- **Winner of the Stellar Argentina Challenge** (September–October 2026), with the Stellar build of this same product.
+- That Stellar build was live at [app.changuito.me](https://app.changuito.me) before this port. Its guest chat (search, compare, build a cart) is how shoppers first used the agent.
 
 The next test is the narrow one: **ten diaspora households paying for one
 weekly shop for family in Argentina**, with the treasury paying the store. That
