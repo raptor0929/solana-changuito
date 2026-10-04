@@ -26,9 +26,8 @@ export interface Balances {
  * exactly that, and asking somebody to press a button until their money shows
  * up is asking them to do the polling by hand.
  *
- * Ten seconds because a Stellar ledger closes in about five, so it is roughly
- * "the next ledger or the one after", which is as fast as the answer can
- * change. Only while `visibilityState` is `visible`, and a read fires on the
+ * Ten seconds because devnet confirms in well under that, and a public RPC
+ * rate-limits anything much faster. Only while `visibilityState` is `visible`, and a read fires on the
  * way back to visible: a shopper who switched to their exchange app to send
  * the money is the exact person who needs the number to be right when they
  * switch back, and a background tab is the exact one that should not be
@@ -45,17 +44,9 @@ export interface Balances {
  * fix: flipping the mode drops the old number and refetches rather than
  * leaving one chain's balance on screen under the other one's label.
  *
- * ## Only ever called with mainnet now
- *
- * `address` comes from the connected wallet, and since lib/app-mode.ts the
- * only way to have one is to be signed in, which is production, which is
- * mainnet. So the testnet arm of this is unreachable from the app: preview
- * shows no balance at all, because the money on screen would be ours.
- *
- * The `network` parameter stays. Removing it would hardcode a chain into a
- * hook that has no opinion about chains, and the arm costs nothing — it is
- * one fetch with a different query string. If a second Pollar key ever
- * returns, this is one of the few places that needs no change.
+ * ## One network
+ * Only devnet exists now. The `network` parameter stays because it costs one
+ * query string and keeps chains out of a hook that has no opinion about them.
  *
  * ## `error` is copy, never a message from somewhere else
  *

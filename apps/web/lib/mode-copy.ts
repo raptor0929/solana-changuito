@@ -22,7 +22,7 @@ import { DEFAULT_LANG, type Lang } from './lang.ts';
  */
 
 export interface ModeCopy {
-  network: NetworkId;
+  network: string;
   /** The mode's name, read by a screen reader off the badge. */
   label: string;
   /** The same at phone width, where two full labels do not fit. */
@@ -40,7 +40,7 @@ export interface ModeCopy {
 }
 
 const PRUEBA: ModeCopy = {
-  network: 'testnet',
+  network: 'devnet',
   label: 'Modo prueba',
   short: 'Prueba',
   balanceUnit: 'USDC de prueba',
@@ -61,7 +61,7 @@ const REAL: ModeCopy = {
   holdNote: '',
 };
 
-const COPY: Record<NetworkId, ModeCopy> = { testnet: PRUEBA, mainnet: REAL };
+const COPY: Record<NetworkId, ModeCopy> = { devnet: PRUEBA };
 
 /**
  * The mode's voice. `lang` is optional and defaults to Spanish, so every
@@ -94,9 +94,9 @@ export const MODES: readonly ModeCopy[] = [PRUEBA, REAL];
  */
 export const PREVIEW_MASTHEAD = {
   /** Sits under the badge, where the balance is in the other mode. */
-  hint: 'Probá todo el pago con nuestra plata.',
+  hint: 'Entrá con tu email para pagar.',
   /** The crossing. */
-  action: 'Cambiar a modo real',
+  action: 'Iniciar sesión',
 } as const;
 
 /**
@@ -177,7 +177,7 @@ export const RECEIVE = {
   qrAlt: 'Código QR con tu dirección',
   addressLabel: 'Tu dirección',
   /** The two answers a withdrawal form asks for, as a list so neither is prose. */
-  facts: ['Red: Stellar', 'Moneda: USDC', 'Memo: no hace falta'] as readonly string[],
+  facts: ['Red: Solana (devnet)', 'Moneda: USDC de prueba', 'Memo: no hace falta'] as readonly string[],
   /** The unrecoverable mistake, said plainly rather than as a warning icon. */
   warn: 'Si elegís otra red, el dinero no llega y no se puede recuperar.',
   dismiss: 'Listo',
@@ -202,7 +202,7 @@ export const RECEIVE = {
  * ------------------------------------------------------------------------- */
 
 const PRACTICE: ModeCopy = {
-  network: 'testnet',
+  network: 'devnet',
   label: 'Practice mode',
   short: 'Practice',
   balanceUnit: 'practice USDC',
@@ -223,13 +223,13 @@ const LIVE: ModeCopy = {
   holdNote: '',
 };
 
-const COPY_EN: Record<NetworkId, ModeCopy> = { testnet: PRACTICE, mainnet: LIVE };
+const COPY_EN: Record<NetworkId, ModeCopy> = { devnet: PRACTICE };
 
 export const MODES_EN: readonly ModeCopy[] = [PRACTICE, LIVE];
 
 export const PREVIEW_MASTHEAD_EN = {
-  hint: "Try the whole payment on our money.",
-  action: 'Switch to real mode',
+  hint: 'Sign in with your email to pay.',
+  action: 'Sign in',
 } as const;
 
 export const BALANCE_EN = {
@@ -250,7 +250,7 @@ const RECEIVE_EN = {
   lead: 'This is your address. Send USDC here from wherever you keep it.',
   qrAlt: 'QR code with your address',
   addressLabel: 'Your address',
-  facts: ['Network: Stellar', 'Asset: USDC', 'Memo: not needed'] as readonly string[],
+  facts: ['Network: Solana (devnet)', 'Asset: test USDC', 'Memo: not needed'] as readonly string[],
   warn: "If you pick a different network the money will not arrive, and it cannot be recovered.",
   dismiss: 'Done',
 } as const;

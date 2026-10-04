@@ -1,6 +1,5 @@
 'use client';
 
-import { usePollar } from '@pollar/react';
 import { useEffect, useRef, useState } from 'react';
 
 import type { Cart } from '@changuito/mcp/types';
@@ -20,14 +19,12 @@ import {
   loginGateBannerText,
   loginRequiredMessage,
 } from '../lib/login-constants';
-import { pollarEnabled } from '../lib/pollar';
-import { ensureUserCookie } from '../lib/session-login';
+import { ensureUserCookie, type TokenSource } from '../lib/session-login';
 import { storeOrderUrl, storeOrdersUrl } from '../lib/storefront.ts';
 import { progressCopy } from '../lib/turn-progress.ts';
 import { uiCopy } from '../lib/ui-copy.ts';
 import { useChat } from '../lib/use-chat';
-import { useWalletSigner } from '../lib/use-wallet-signer.ts';
-import type { WalletSigner } from '../lib/wallet-proof.ts';
+import { useWallet } from '../lib/use-wallet.ts';
 import { CartCard } from './CartCard';
 import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
@@ -76,15 +73,16 @@ function useComposerPlaceholder(lang: Lang): string {
 }
 
 export function Chat() {
-  // Same split as WalletWidget: usePollar only mounts inside a real provider.
-  return pollarEnabled ? <ChatWithPollar /> : <ChatCore />;
-}
-
-function ChatWithPollar() {
-  const { isAuthenticated, openLoginModal, wallet } = usePollar();
-  const sign = useWalletSigner();
-  const address = isAuthenticated ? (wallet?.address ?? null) : null;
-  return <ChatCore isAuthenticated={isAuthenticated} openLoginModal={openLoginModal} address={address} sign={sign} />;
+  const wallet = useWallet();
+  if (!wallet.enabled) return <ChatCore />;
+  return (
+    <ChatCore
+      isAuthenticated={wallet.authenticated && Boolean(wallet.address)}
+      openLoginModal={wallet.login}
+      address={wallet.address}
+      sign={wallet.accessToken}
+    />
+  );
 }
 
 function ChatCore({
@@ -96,8 +94,8 @@ function ChatCore({
   isAuthenticated?: boolean;
   address?: string | null;
   openLoginModal?: () => void;
-  /** The wallet's SEP-53 signer. Absent in a build without Pollar. */
-  sign?: WalletSigner;
+  /** The Privy access token source. Absent in a build without Privy. */
+  sign?: TokenSource;
 }) {
   const { network } = useNetwork();
   const lang = useLang();
@@ -179,18 +177,18 @@ function ChatCore({
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [state.blocks]);
 
-  // After Pollar login, drop the guest latch and any soft-limit line already
+  // After login, drop the guest latch and any soft-limit line already
   // written into the transcript. The banner also keys off isAuthenticated, so
   // a signed-in shopper never keeps the red gate for this render.
   useEffect(() => {
     if (isAuthenticated) clearLoginRequired();
   }, [isAuthenticated, clearLoginRequired]);
 
-  /** True once the server has the cookie, not merely once Pollar says hello. */
+  /** True once the server has the cookie, not merely once Privy says hello. */
   const [sessionReady, setSessionReady] = useState(false);
 
   // The cookie is what /api/chat actually reads, and minting it is a round
-  // trip. The banner can hide as soon as Pollar says the shopper is in, but
+  // trip. The banner can hide as soon as Privy says the shopper is in, but
   // re-sending the rejected message has to wait until the mint resolved —
   // otherwise the retry POSTs into the same 401. Keyed on the address because
   // `wallet` can still be null when the flag flips.

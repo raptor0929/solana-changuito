@@ -8,10 +8,10 @@
  */
 
 /** 50.00 USDC. Enough for a week's basket, not enough to be worth farming. */
-export const GRANT_UNITS = 500_000_000n;
+export const GRANT_UNITS = 50_000_000n; // 50.00 at 6 decimals
 
 /** Above this, the faucet stops: the wallet is not short of money. */
-export const ENOUGH_UNITS = 1_000_000_000n; // 100.00
+export const ENOUGH_UNITS = 100_000_000n; // 100.00
 
 /** One grant per address per minute. */
 export const COOLDOWN_MS = 60_000;

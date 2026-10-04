@@ -1,14 +1,13 @@
-import { signWalletProof, type WalletSigner } from './wallet-proof.ts';
+/** Returns the Privy access token for the live session, or null. */
+export type TokenSource = () => Promise<string | null>;
 
 /**
  * Mint the httpOnly `chg_user` cookie that lifts the guest turn limit.
  *
- * The server no longer takes the address on trust: each mint carries a
- * SEP-53 signature from the wallet over a login message, which Pollar makes
- * only for a live session. So a mint needs a signer, and a wallet that will
- * not sign (a passkey smart wallet, a declined prompt) simply stays a guest.
+ * The server does not take the address on trust: each mint carries the
+ * Privy access token, and the server reads the wallet from Privy itself.
  *
- * Two callers race the same Pollar login: the balance widget, which wants
+ * Two callers race the same Privy login: the balance widget, which wants
  * the cookie to exist, and the chat, which has to *know* it exists before it
  * re-sends the message the gate rejected — otherwise the retry POSTs into the
  * same 401 it is recovering from. So the mint is awaitable, and de-duplicated
@@ -27,16 +26,16 @@ let pending: { address: string; done: Promise<boolean> } | null = null;
 let readyAddress: string | null = null;
 let generation = 0;
 
-function start(address: string, sign: WalletSigner): Promise<boolean> {
+function start(address: string, sign: TokenSource): Promise<boolean> {
   const gen = generation;
-  const done = signWalletProof(sign, 'login', address)
-    .then((proof) =>
-      proof
+  const done = sign()
+    .then((token) =>
+      token
         ? fetch('/api/session/login', {
             method: 'POST',
             headers: { 'content-type': 'application/json', accept: 'application/json' },
             credentials: 'same-origin',
-            body: JSON.stringify({ address, proof }),
+            body: JSON.stringify({ token }),
           }).then((r) => r.ok && gen === generation)
         : false,
     )
@@ -56,7 +55,7 @@ function start(address: string, sign: WalletSigner): Promise<boolean> {
 /** Resolves true when the server has the cookie. Never rejects. */
 export function ensureUserCookie(
   address: string,
-  sign: WalletSigner,
+  sign: TokenSource,
   opts?: { force?: boolean },
 ): Promise<boolean> {
   const force = opts?.force === true;

@@ -335,6 +335,51 @@ Keep it that narrow. A follow-up ("no sé", "¿qué es un CPA?") deserves a
 model; a false negative on the postal-code regex only means the model gets
 the message, which is what used to happen to every message.
 
+### 8. Checkout is an escrow and a sandbox, not an iframe
+
+*The Solana port. Not the agent, but the agent's cart
+is what it pays for, so the rules live here too.*
+
+The store's checkout used to open in an iframe and the shopper typed a card
+into it. Now the shopper locks USDC in the `changuito_escrow` program
+(`anchor/`), and a separate service (`services/sandbox`, Jev + Playwright)
+walks Día's checkout with the same basket. Reaching the card step settles the
+escrow to the treasury; anything else refunds it. `lib/checkout/` is the server
+half, `CheckoutModal.tsx` the browser half.
+
+- **The sandbox never pays.** It stops at the card form, and the store's order
+  and payment endpoints are aborted at the network layer. "Settled" means the
+  basket was proven buyable, not that an order exists. Copy must not claim
+  more than that.
+- **The handoff link is the shopper's own cart** (`handoffUrl` from
+  `get_cart_link`), never the sandbox's `orderFormId`. The sandbox's cart
+  belongs to our Día account and opening it would expose that profile. The
+  sandbox's id goes into the receipt hash as evidence and nowhere else.
+- **`/api/checkout/start` reads the order PDA from chain before it starts a job**:
+  buyer, status, amount and basket hash against the quote. A signature from
+  the browser is a hint, not proof.
+- **`open` is the buyer's signature and the resolver's fee.** Privy's gas
+  sponsorship is not used. `/api/checkout/open` builds the transaction with the
+  resolver as fee payer and keeps its message bytes on the checkout record
+  (`openMessage`); the wallet signs as buyer and does not send; the `PUT`
+  co-signs and sends only if the bytes that come back are **exactly** the ones
+  stored and the buyer's signature verifies. A key that pays fees must never
+  sign whatever a browser hands it — so do not relax that to "decodes to an
+  `open` for this order". Rent stays the buyer's (`payer = buyer` in the
+  program), which is why the faucet still sends SOL. The cost is that the
+  resolver hot key now pays every shopper's fee and must be kept in devnet SOL.
+- **Settle and refund check on-chain status first.** Polls overlap; the
+  program rejects a second close anyway, but a failed transaction is a red
+  line in the UI for nothing.
+- **No `SANDBOX_URL` in dev means a mock job** (`lib/checkout/sandbox.ts`), and
+  `SANDBOX_MOCK_FAIL=1` forces the refund path. In production the mock is off
+  unless `SANDBOX_MOCK=1`. `scripts/devnet-e2e.mts` drives the routes against
+  devnet with it.
+- **`next build` typechecks through `tsconfig.build.json`**, which leaves out
+  `lib/test`. Several tests still pin Stellar behaviour and fail typecheck; per
+  the rule below they are reported, not edited, and `npm run typecheck` still
+  covers them.
+
 ---
 
 ## Things that are the way they are on purpose

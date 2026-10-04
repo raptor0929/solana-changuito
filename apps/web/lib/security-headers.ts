@@ -11,14 +11,11 @@ import { STOREFRONT_ORIGINS } from './storefront.ts';
  *
  * What the browser actually talks to, and so what the CSP names:
  * - Turnstile: script, iframe and beacon on challenges.cloudflare.com.
- * - Pollar: its SDK API (sdk.api.pollar.xyz), its logo (pollar.xyz), and the
- *   Stellar Horizon/RPC hosts it reads balances and submits through. OAuth
- *   and Albedo are top-level navigations and popups, which CSP does not
- *   restrict. Neither Pollar nor the Stellar SDK uses eval.
+ * - Privy: the auth API, its embedded-wallet iframe and its relays (below).
+ * - Solana devnet: the RPC (https and wss) from deployments.ts, which the
+ *   balance reads and the open transaction's blockhash go through.
  * - Product photos: every retailer serves them from *.vtexassets.com.
- * - Supermarket checkout: framed inside the chat, so the store's own origin
- *   is in frame-src. See lib/storefront.ts for what that does and does not
- *   buy — a store can start refusing at any time and nothing warns us.
+ * - Supermarket origins stay in frame-src; see lib/storefront.ts.
  * - Analytics: only the vendors whose id is set, same as www.
  *
  * `'unsafe-inline'` for scripts stays for the reason www gives: a nonce makes
@@ -27,18 +24,22 @@ import { STOREFRONT_ORIGINS } from './storefront.ts';
  */
 
 export const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
-const POLLAR_API = 'https://sdk.api.pollar.xyz';
-const POLLAR_ASSETS = 'https://pollar.xyz';
+/** Privy: the auth API, its embedded-wallet iframe, and its RPC relays. */
+const PRIVY = ['https://auth.privy.io', 'https://*.privy.io', 'https://*.privy.systems'];
+const PRIVY_WS = ['wss://*.privy.io', 'wss://relay.walletconnect.com'];
 /**
- * Derived from lib/deployments.ts rather than listed, because the list and the
- * config drifting is a failure the browser reports as "fetch failed" from
- * inside the Stellar SDK — which reads like the network is down. Every chain
- * host the app can be pointed at is in DEPLOYMENTS by construction, so taking
- * them from there means adding a network cannot forget this file.
+ * Derived from lib/deployments.ts rather than listed, so the RPC the app is
+ * pointed at and the RPC the browser may reach cannot drift. The wss twin is
+ * for Privy's confirmation subscriptions.
  */
-const STELLAR = [
-  ...new Set(NETWORK_IDS.flatMap((net) => [DEPLOYMENTS[net].horizonUrl, DEPLOYMENTS[net].rpcUrl])),
-].map((url) => new URL(url).origin);
+const SOLANA = [
+  ...new Set(
+    NETWORK_IDS.flatMap((net) => {
+      const origin = new URL(DEPLOYMENTS[net].rpcUrl).origin;
+      return [origin, origin.replace(/^http/, 'ws')];
+    }),
+  ),
+];
 const PRODUCT_IMAGES = 'https://*.vtexassets.com';
 
 export function analyticsCspSources(ids: AnalyticsIds = ANALYTICS_IDS): { script: string[]; connect: string[]; img: string[] } {
@@ -82,14 +83,14 @@ export function appContentSecurityPolicy(
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'${isProd ? '' : " 'unsafe-eval'"}${join(vendors.script)} ${TURNSTILE_ORIGIN}`,
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data: blob: ${PRODUCT_IMAGES} ${POLLAR_ASSETS}${join(vendors.img)}`,
+    `img-src 'self' data: blob: ${PRODUCT_IMAGES}${join(vendors.img)}`,
     "font-src 'self' data:",
-    `connect-src 'self'${isProd ? '' : ' ws: wss:'} ${POLLAR_API} ${STELLAR.join(' ')}${join(vendors.connect)} ${TURNSTILE_ORIGIN}`,
+    `connect-src 'self'${isProd ? '' : ' ws: wss:'} ${PRIVY.join(' ')} ${PRIVY_WS.join(' ')} ${SOLANA.join(' ')}${join(vendors.connect)} ${TURNSTILE_ORIGIN}`,
     // Turnstile's challenge, and the supermarket checkout the shopper
     // finishes the order on. 'self' is the dev fixture at /dev/checkout,
     // which stands in for a store that has no sandbox. This is the frames
     // *we* may open; being framed is still refused outright, below.
-    `frame-src 'self' ${TURNSTILE_ORIGIN} ${STOREFRONT_ORIGINS.join(' ')}`,
+    `frame-src 'self' ${TURNSTILE_ORIGIN} ${PRIVY.join(' ')} ${STOREFRONT_ORIGINS.join(' ')}`,
     "worker-src 'self' blob:",
     "frame-ancestors 'none'",
     "base-uri 'self'",

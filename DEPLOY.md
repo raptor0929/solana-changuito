@@ -1,293 +1,127 @@
 # Deploying changuito
 
-Two halves, in this order: the contracts on Stellar testnet, then the app on
-Vercel. The contracts are already deployed and their ids are committed in
-`deployments.json`, so **if you are only deploying the app, skip to part 2.**
+Three pieces, and only the first two are needed for a working deployment:
+
+1. **The web app on Vercel** (`apps/web`) — the chat, the wallet, the checkout routes.
+2. **The sandbox on Railway** (`services/sandbox`) — the browser agent that walks Día's checkout. Without it, a non-production build uses an in-process mock, and production needs `SANDBOX_MOCK=1`.
+3. **The escrow program on Solana devnet** — already deployed. Its addresses are committed in `deployments.json` and the generated `apps/web/lib/deployments.ts`, so **you only need Part 3 to redeploy your own copy.**
+
+Devnet only. There is no mainnet configuration and no network switch.
 
 ---
 
-## Part 1 — the contracts
+## Part 1 — the web app on Vercel
 
-You need this if you changed anything under `contracts/`, or if testnet has
-been reset since the ids in `deployments.json` were recorded.
+### 1.1 Accounts and keys you need first
 
-### 1.1 Install the toolchain
+| | Where | Becomes |
+|---|---|---|
+| **OpenAI or Anthropic** (one) | [platform.openai.com](https://platform.openai.com/api-keys) or [console.anthropic.com](https://console.anthropic.com) → API keys | `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (Part 4) |
+| **Privy** | [dashboard.privy.io](https://dashboard.privy.io) → your app → Settings | `NEXT_PUBLIC_PRIVY_APP_ID`, `PRIVY_APP_SECRET` |
+| **Resolver keypair** | `~/.config/solana/changuito/resolver.json` on the machine that deployed the program | `SOLANA_RESOLVER_SECRET` |
+| **Cloudflare Turnstile** | Cloudflare → Turnstile → add a site | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` |
+| **Upstash Redis** | Vercel → Storage → Marketplace (1.5) | `KV_REST_API_URL`, `KV_REST_API_TOKEN` |
 
-```bash
-rustup target add wasm32v1-none
-brew install stellar-cli          # or: cargo install --locked stellar-cli
-stellar --version
-```
+### 1.2 Configure Privy
 
-Built and verified with CLI 25.1.0 against a protocol-28 ledger. A newer CLI is
-fine; if yours is much older, upgrade rather than pinning `soroban-sdk` down to
-meet it.
+In the Privy dashboard, for the app whose id you will use:
 
-### 1.2 Point the CLI at testnet
+1. **Login methods → Email** and **Google** on. The provider also passes
+   `loginMethods: ['email', 'google']`, so anything else enabled there is not
+   offered.
+2. **Embedded wallets → Solana** on, **create on login for all users**.
+   Ethereum embedded wallets off.
+3. **Gas sponsorship** is not needed; leave it off. The wallet only signs
+   `open`: `/api/checkout/open` builds it with the resolver as fee payer, adds
+   the resolver's signature and sends it. So the **resolver needs devnet SOL**
+   for those fees (about 0.00001 SOL each). Rent is still the buyer's — the
+   faucet sends 0.01 SOL with the test USDC for that.
+4. **Allowed origins:** `http://localhost:3124` and every domain you deploy to
+   (production and, if you use them, Vercel preview URLs).
+5. Copy the **App ID** and **App secret**.
 
-```bash
-stellar network add testnet \
-  --rpc-url https://soroban-testnet.stellar.org \
-  --network-passphrase "Test SDF Network ; September 2015"
-```
+`PRIVY_APP_SECRET` is required for login, not optional: the access token is
+verified against Privy's public JWKS, but the user's linked Solana wallet is
+read from Privy's REST API with the secret, and without it `/api/session/login`
+answers 401 to everyone.
 
-### 1.3 Run the deploy script
+### 1.3 Import the repository
 
-```bash
-npm run deploy:testnet
-```
-
-That one command does all of it:
-
-1. Creates the two identities if they are missing — `changuito-resolver` (the
-   token admin *and* the escrow resolver: one hot key, because a demo with two
-   is two keys to leak) and `changuito-treasury` (an address only; nothing ever
-   signs for it) — and tops both up from friendbot.
-2. Builds both contracts for `wasm32v1-none`.
-3. Deploys `mock_usdc` with the resolver as admin, then `escrow` with the
-   resolver, the treasury and the token id as constructor arguments.
-4. Writes `deployments.json`, and generates `apps/web/lib/deployments.ts` from
-   it.
-5. Generates TypeScript bindings into `packages/escrow-bindings` and
-   `packages/usdc-bindings`, then rewrites each one's `package.json` to be a
-   workspace package that shares the app's exact `@stellar/stellar-sdk`
-   version. That last part matters: two copies of the SDK in one process means
-   two sets of XDR classes, and `instanceof` quietly stops working.
-6. Verifies the result with live `config`, `symbol` and `decimals` calls.
-
-It is idempotent. A contract already recorded is left alone, so re-running
-after a failure halfway through resumes instead of stranding the first
-contract. To force new ids:
-
-```bash
-npm run deploy:testnet -- --force
-```
-
-### 1.4 Commit what changed
-
-```bash
-git add deployments.json apps/web/lib/deployments.ts packages/*-bindings
-npm test          # the suite checks the bindings and deployments.json agree
-```
-
-### 1.5 Put the resolver secret where the app can read it
-
-```bash
-stellar keys show changuito-resolver     # prints S…
-```
-
-Paste it into `apps/web/.env.local` as `STELLAR_RESOLVER_SECRET`. That file is
-gitignored. The app refuses a key whose public address does not match the
-resolver the contracts were deployed with, so a stale one fails loudly rather
-than at the first mint.
-
-### 1.6 Issue the testnet USDC preview pays with
-
-Run once per testnet reset, and only if `contracts.usdc.issuer` is `null` for
-testnet in `deployments.json`.
-
-```bash
-node scripts/setup-demo-asset.mjs --demo <identity> --deposit <identity>
-```
-
-Both arguments are `stellar keys ls` identity names: the demo wallet that
-preview pays *from*, and the account `DEPOSIT_ADDRESS_TESTNET` names, which it
-pays *to*. The script checks the second really is that address before it signs
-anything, and refuses outright if testnet already has a classic issuer.
-
-**Why this exists rather than reusing `mock_usdc`.** The Soroban token
-(`contracts.usdc.id`) is a pure SEP-41 contract: balances live in contract
-storage and transfers are contract events, so there is no classic payment
-record with a memo field for the deposit rail to read. Minting billions of it
-to the demo wallet would fund a balance the rail cannot see — which is why
-`depositAssetFor` treats a falsy issuer as native XLM, and why preview paid in
-lumens until this ran. A classic asset means preview rehearses the mainnet path
-exactly: trustline, asset code, issuer, memo. With play money.
-
-What the script does, in order: friendbots the demo wallet and the deposit
-account if either has no ledger entry yet; generates and funds a fresh issuer;
-adds a `USDC:<issuer>` trustline from both sides of the rail, because a classic
-asset cannot reach an account that has not trusted it; pays **1,000,000,000
-USDC** to the demo wallet; then sets the issuer's master weight to `0` and
-deletes the identity. That last step is the point — it
-locks the account, so no further issuance is possible by anyone including us,
-and "a billion is the supply" becomes a property of the ledger rather than a
-promise in a comment. **No secret passes through the process**: every signature
-is made by the `stellar` CLI from its own keystore.
-
-Then record the issuer and regenerate — do not hand-edit the generated module,
-it carries a do-not-edit header:
-
-```bash
-# set contracts.usdc.issuer for testnet in deployments.json to the printed G…
-node scripts/write-deployments-module.mjs
-node scripts/check-deposit-account.mjs testnet   # trustline present, asset matches
-git add deployments.json apps/web/lib/deployments.ts
-npm test
-```
-
-`contracts.usdc.id` stays as it is. The Soroban token still backs the dormant
-escrow; it is simply no longer on the deposit rail.
-
----
-
-## Part 2 — the app on Vercel
-
-### 2.1 Get the two API keys
-
-- **Anthropic** — [console.anthropic.com](https://console.anthropic.com) → API
-  keys. This is what runs the shopping agent.
-- **Pollar** — the [Pollar dashboard](https://pollar.xyz) → your application →
-  API key, with the network set to **mainnet**. This one is publishable and
-  ships in the browser bundle by design.
-
-Mainnet, and only mainnet. A Pollar dashboard key is network-scoped, this
-project holds one, and [2.3](#23-preview-and-production) is why that is a
-design rather than a gap.
-
-### 2.2 Import the repository
-
-In Vercel: **Add New → Project**, import `raptor0929/changuito`.
+In Vercel: **Add New → Project**, import the repository.
 
 | Setting | Value |
 |---|---|
 | Framework preset | Next.js |
 | Root directory | `apps/web` |
-| Build command | *(leave as the default)* |
-| Install command | *(leave as the default)* |
+| Build / install command | *(defaults)* |
 | Node.js version | **22.x** |
 
-Two of these are not optional:
+Root directory `apps/web` is a workspace and Vercel still installs from the repo
+root, so `@changuito/mcp` resolves normally. Node 22 because the repo uses
+`--experimental-strip-types` and `.nvmrc` pins 22.12.0.
 
-- **Root directory `apps/web`.** It is a workspace, and Vercel still installs
-  from the repo root, so the MCP package and the bindings resolve normally.
-- **Node 22.x.** `@stellar/stellar-sdk@17` requires ≥ 22.12 and the install
-  fails outright on 20.
+### 1.4 Environment variables
 
-### 2.3 Preview and production
+Every variable, with what happens when it is missing, is in
+[docs/tech-stack.md](docs/tech-stack.md#environment-variables) and annotated in
+[`apps/web/.env.example`](apps/web/.env.example). For a production deployment:
 
-One deployment, one URL, two apps — and **which one a visitor is in is decided
-by whether Pollar has a session**, evaluated in the browser (`lib/app-mode.ts`).
+| Variable | Value |
+|---|---|
+| `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` | from 1.1; set one. With the OpenAI key set, it answers every hop |
+| `NEXT_PUBLIC_PRIVY_APP_ID` | from 1.2 |
+| `PRIVY_APP_SECRET` | from 1.2 |
+| `CHG_SESSION_SECRET` | `openssl rand -hex 32`. Signs the `chg_user` cookie; unset in production, login answers 503. Rotating it signs everyone out |
+| `SOLANA_RESOLVER_SECRET` | the contents of `resolver.json` (the 64-number JSON array), or its base58 form. Checked against the resolver address in `lib/deployments.ts` and refused if it does not match |
+| `SOLANA_RPC_URL`, `NEXT_PUBLIC_SOLANA_RPC_URL` | optional; a dedicated devnet RPC. The public `api.devnet.solana.com` rate-limits under traffic |
+| `SANDBOX_URL`, `SANDBOX_TOKEN` | from Part 2. Until then, set `SANDBOX_MOCK=1` or checkout cannot start in production |
+| `KV_REST_API_URL`, `KV_REST_API_TOKEN` | injected by 1.5 |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | from 1.1 |
+| `ARS_PER_USD` | optional; pins the rate for a demo |
+| `DATABASE_URL` | optional; 1.6 |
 
-| | **preview** | **production** |
-|---|---|---|
-| who is it | nobody signed in | a Pollar session |
-| network | testnet | mainnet |
-| who pays | **the demo wallet, server-signed** | their own wallet |
-| money | the USDC issued in [1.6](#16-issue-the-testnet-usdc-preview-pays-with) | real Circle USDC |
-| Postgres | **never touched** | chat, orders, the card binding |
-| the card | one per código, given back with the basket | one per customer, kept |
+Three of these fail in ways worth knowing before they happen:
 
-**Signing in *is* the crossing.** There is no mode variable, no toggle and no
-second deployment, and there must not be one: a mode derived from the session
-cannot disagree with who you are, which deletes the entire class of bug where
-somebody spends real money in what the screen calls the demo. The control
-beside the balance is a read-only badge saying which of the two you are in.
+- **`TURNSTILE_SECRET_KEY` fails shut.** Unset in production, `middleware.ts`
+  answers 403 `solo_humanos` on every `/api/*` route except `/api/human`, so
+  chat, login, faucet and checkout are all dead. Deliberate: an open agent
+  endpoint on a public URL bills somebody's model key. The site key does
+  not affect the gate, but without it the widget never mounts and nobody gets
+  through.
+- **`SOLANA_RESOLVER_SECRET` is read at call time**, so a build without it
+  succeeds and the faucet answers 503, and an order that reaches the end of
+  shopping cannot be settled or refunded. Never prefix it `NEXT_PUBLIC_` and
+  never log it.
+- **Without `SANDBOX_URL` in production, checkout refunds.** `sandboxMode()` is
+  `off` there unless `SANDBOX_MOCK=1`, so a shopper who locks USDC gets it back
+  at the first status poll.
 
-Preview exists so that anyone with the link can search, fill a basket, watch a
-**real on-chain payment settle and a real card appear** without connecting
-anything. It is a demo with a ledger behind it, not a mock: the only step that
-differs from production is who signs the payment.
+Only the `NEXT_PUBLIC_` names reach the browser. Do not add the prefix to any
+other.
 
-Two consequences worth knowing before you configure anything:
+### 1.5 Redis: conversation history, quotas, checkout records
 
-- **A deployment that sets only the preview half is complete**, not broken. No
-  Pollar key, no Vyrion key and no database still gives you the whole demo;
-  what is missing is the way out of it, and the sign-in button says so.
-- **A guest who runs out of free turns is told to sign in**, which now means
-  "switch to spending real money". That is the honest crossing and the copy
-  names it. Raise `FREE_TURNS` if the demo feels cramped — the ceiling is your
-  Anthropic bill on a public URL, held back by Turnstile and the per-IP cap.
+1. **Storage → Create Database → Marketplace → Upstash for Redis.**
+2. Region: match your functions (Vercel's default is `iad1`). Leave Read
+   Regions empty.
+3. **Turn Eviction on.** Off means writes *fail* once the database is full.
+   Conversations are a cache with a one hour TTL; checkout records live 24 hours.
+4. **Connect Project.** That injects `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
 
-### 2.4 Environment variables
+Required in production because the quotas fail closed: without it (or with
+Redis down) `/api/chat` answers 503 rather than running unlimited turns on your
+key. It also matters for checkout — the record written at quote is read at
+start and at every status poll, possibly by a different lambda, and the
+in-process fallback does not survive that.
 
-Under **Settings → Environment Variables**, for Production *and* Preview.
-Grouped by which of the two apps needs them.
+Use the REST pair, not `REDIS_URL` or `KV_URL`: those are `rediss://` strings
+for a TCP client. Locally, leave them out and an in-process Map stands in.
 
-**Always:**
+### 1.6 The database (optional)
 
-| Name | Value | Exposed to |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | `sk-ant-…` | server only |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | from Cloudflare → Turnstile | the browser, by design |
-| `TURNSTILE_SECRET_KEY` | **required**, the matching secret | server only |
-| `KV_REST_API_URL` | set by the Redis integration | server only |
-| `KV_REST_API_TOKEN` | set by the Redis integration | server only |
-| `FX_ARS_PER_USD` | optional, e.g. `1500` | server only |
-
-**Preview — the demo pays for itself:**
-
-| Name | Value | Exposed to |
-|---|---|---|
-| `DEPOSIT_ADDRESS_TESTNET` | the `G…` account preview deposits are paid into | server only |
-| `DEMO_WALLET_SECRET` | the `S…` for the account pinned as `demoWallet` | server only |
-
-**Production — they pay, and it is remembered:**
-
-| Name | Value | Exposed to |
-|---|---|---|
-| `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` | the Pollar key from [2.1](#21-get-the-two-api-keys) | the browser, by design |
-| `CHG_SESSION_SECRET` | **required**, `openssl rand -base64 32` | server only |
-| `DEPOSIT_ADDRESS_MAINNET` | the `G…` operator account real deposits are paid into | server only |
-| `VYRION_API_KEY` | `sk_test_…`, or `sk_live_…` with `ALLOW_LIVE=1` | server only |
-| `ALLOW_LIVE` | `1`, and only when you mean it | server only |
-| `DATABASE_URL` | the Supabase **pooler** string, port 6543 | server only |
-| `REAL_MODE_ALLOWLIST_ADDRESSES` | who may pay — see [2.8](#28-who-may-pay) | server only |
-| `REAL_MODE_OPEN_TO_ALL` | optional, `1` to drop that list — read [2.8](#28-who-may-pay) first | server only |
-
-**Still configured, no longer reachable from the UI:**
-`STELLAR_RESOLVER_SECRET`, `STELLAR_RESOLVER_SECRET_MAINNET`,
-`FAUCET_ALLOWLIST_ADDRESSES`, `FAUCET_OPEN_TO_ALL`. These belong to the escrow
-rail and the testnet faucet, and neither has a button any more — see
-[docs/flows.md](docs/flows.md#6-dormant-the-escrow). Leave them set if they
-are set; nothing calls them.
-
-`DEPOSIT_ADDRESS_*` is **public by nature** — it is printed on screen for the
-shopper to pay — and no secret for either one is anywhere near this deployment.
-Nothing in the app can pay *out of* a deposit account on either network, and a
-refund is done by hand. Unset, the deposit screen answers 503 and says so.
-
-> **One open item.** The two deposit addresses are currently the same account.
-> Separate ledgers, so not a collision — but one secret key then controls both
-> the demo's play money and every real deposit. Splitting them costs a keypair
-> and is cheaper now than later.
-
-`DEMO_WALLET_SECRET` is the one secret key this deployment holds, and the
-reason preview can settle a payment for a visitor with no wallet. It is bounded
-by four separate things rather than by intent (`lib/server/demo-wallet.ts`):
-the asset is play money from a locked issuer, the destination is
-`DEPOSIT_ADDRESS_TESTNET` with no parameter to change it, `demoWallet` is `""`
-on mainnet so a mainnet secret can never match the derived public key, and the
-value is read at call time so a build without it still succeeds. Never
-`NEXT_PUBLIC_`, and never echoed — not even a prefix.
-
-`VYRION_API_KEY` decides whether the card exists: unset, the card button is
-never rendered rather than rendered and broken. `ALLOW_LIVE=1` is the second
-catch — an `sk_live_` key is refused without it, and an `sk_test_` key ignores
-it, so spending real money takes both.
-
-`TURNSTILE_SECRET_KEY` is the one that fails *shut*. Set it and the gate
-enforces; leave it unset in production and `middleware.ts` answers 403
-`solo_humanos` on every `/api/*` route except `/api/human`, so chat, quote and
-checkout are all dead. That is deliberate — an open agent endpoint on a public
-URL bills someone's Anthropic key. The site key is public and deliberately does
-**not** affect the gate, but without it the widget never mounts, so nobody can
-get through.
-
-`CHG_SESSION_SECRET` signs the `chg_user` cookie that records a Pollar login.
-Production reads nothing else for it: unset, sign-in answers 503 and everyone
-stays in preview. The cookie is issued only after the wallet signs a login
-message (SEP-53), so an address alone is not a login. Rotating it signs
-everyone out, which costs them one signature.
-
-Only the two `NEXT_PUBLIC_` names reach the browser. Do not add the prefix to
-any of the others.
-
-### 2.5 The database
-
-Production only. Preview writes nothing, by design and by construction — there
-is no proven address in preview, so `archiveChat` answers `'guest'`, the card
-binding has no owner to key on, and the order table is never reached.
+Postgres holds one thing now: the archive of conversations for signed-in
+wallets. Orders are on chain. A deployment with no `DATABASE_URL` boots and
+works; it just does not archive.
 
 1. **supabase.com → New project.** Region: match your Vercel functions.
 2. **Project Settings → Database → Connection string.** Take both: the
@@ -304,149 +138,175 @@ npm run db:invariants  # the constraints, against the real database
 
 5. In Vercel, set **`DATABASE_URL` only**. Migrations are a laptop operation.
 
-**The 6543/5432 difference is the part that fails only under load**, which is
-why it is spelled out here rather than left to the connection-string picker.
-6543 is transaction-mode pooling: a connection is held for one statement and
-given back, which is exactly the shape of a lambda per request. 5432 is a
-session, which DDL and advisory locks need and which a request handler must
-never open — `lib/db.ts` reads `DATABASE_URL` and deliberately does not read
-`DIRECT_URL`, because a route that quietly took a session connection would work
-perfectly in development and exhaust the database at traffic rather than at
-deploy.
+6543 is transaction-mode pooling, the right shape for a lambda per request;
+5432 is a session, which DDL needs and a request handler must never hold.
+`lib/db.ts` reads `DATABASE_URL` and deliberately not `DIRECT_URL`.
+`prepare: false` is already passed: the pooler rejects named prepared
+statements.
 
-`prepare: false` is already passed and is not optional: the pooler rejects
-named prepared statements, and the failure is a confusing "prepared statement
-already exists" on the *second* request.
+### 1.7 Check a deployment
 
-Nothing here throws at import. A deployment with no `DATABASE_URL` boots and
-serves the chat half; the routes that need a record answer 503 rather than,
-say, minting a second card for somebody who already has one.
+The chat **streams** rather than arriving in one lump. If it arrives all at
+once, something is buffering the SSE response — the route sets
+`X-Accel-Buffering: no`, and the runtime must be `nodejs`, never edge.
 
-Retention, when you get to it: expiring a transcript must **orphan** its order,
-never erase it. The `chat` foreign key on `orders` deliberately does not
-cascade — a conversation is a conversation and an order is evidence that money
-moved (`supabase/migrations/0002_order_identity.sql`).
+Then walk it once: build a basket, press *Pagar*, sign in with an email, press
+*Cargar 50 USDC de prueba*, lock, and wait for *¡Compra completada!*. Open the
+*Bloqueo* and *Liberación* links: both should be devnet transactions against
+program `9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9`.
 
-### 2.6 Conversation history and quotas
-
-Redis, and it is **no longer on the money path** — that moved to Postgres in
-2.5. What it still holds is the agent's in-flight turn, the chat and faucet
-quotas, and the local model's breaker and lanes. Losing it costs chat
-continuity and the breaker, not a deposit.
-
-Required in production all the same, because the quotas fail closed: without
-it (or with Redis down) `/api/chat` answers 503 instead of running unlimited
-turns on your Anthropic key.
-
-1. **Storage → Create Database → Marketplace → Upstash for Redis.**
-2. Region: match your functions (Vercel's default is `iad1`). Leave Read
-   Regions empty.
-3. **Turn Eviction on.** Off means writes *fail* once the database is full.
-   This is a cache — dropping the oldest session is the right answer, and a
-   conversation is roughly 100 KB with a one hour TTL.
-4. **Connect Project.** That injects `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
-
-Use the REST pair, not `REDIS_URL` or `KV_URL`: those are `rediss://` strings
-for a TCP client, and one TCP connection per lambda is the connection-limit
-problem an HTTP client exists to avoid.
-
-Locally, copy the two into `apps/web/.env`. Leave them out and an in-process
-Map stands in, which on one machine is the same guarantee for free.
-
-A reload starts a new chat and the old one is still there: `chat-store.ts`
-keeps the blocks in localStorage and the rail lists them. For a signed-in
-shopper the transcript is also in Postgres, which is what outlives the TTL and
-a cleared browser.
-
-### 2.7 Deploy a preview first
-
-Push to a branch, let Vercel build it, and check on the preview URL before
-promoting.
-
-The rate comes back:
+Without a browser, `scripts/devnet-e2e.mts` drives the same routes against
+any base URL, but it mints its own session cookie, so it only works where it
+knows `CHG_SESSION_SECRET` — locally, or with the same value exported:
 
 ```bash
-curl "https://<preview>/api/quote?centavos=1234500"
+CHG_SESSION_SECRET=… node --experimental-strip-types scripts/devnet-e2e.mts https://<your-deployment>
 ```
 
-And the chat **streams** rather than arriving in one lump. If it arrives all at
-once something is buffering the SSE response — the route sets
-`X-Accel-Buffering: no` for exactly this, and the runtime must be `nodejs`,
-never edge.
+Behind Turnstile in production it will be refused at the middleware; run it
+against `npm run dev` instead (see [docs/judges.md](docs/judges.md#5-verify-it-yourself)).
 
-Then walk preview end to end, which is the whole point of it: load with no
-session, build a basket, pay with the demo wallet, watch the deposit go from
-waiting to confirmed, and see the card. Then open the payment on Horizon and
-confirm it is **`USDC:<issuer>` with the código in the memo** — not XLM, and
-not a Soroban event. Then confirm no row landed in `chat`, `orders` or
-`card_owner`.
+## Part 2 — the sandbox on Railway
 
-Then **Promote to Production**.
+`services/sandbox` is a FastAPI service around a Playwright harness. It holds
+one operator Día account and runs one job at a time. Details in
+[docs/sandbox.md](docs/sandbox.md).
 
-### 2.8 Who may pay
+### 2.1 Create the service
 
-`REAL_MODE_ALLOWLIST_ADDRESSES` decides who may pay with real money. Same
-format and the same deny-by-default rule as the old faucet list: empty in
-production means nobody, Previews included. It is enforced **after** the
-wallet's SEP-53 signature is verified, so it is checked against a proven
-address rather than a claimed one. Passkey wallets (`C…`) cannot sign that
-message, so testers need a custodial `G…` account.
+1. **Railway → New Project → Deploy from GitHub repo**, this repository.
+2. In the service's **Settings → Source**, set **Root directory** to
+   `services/sandbox`. Railway then picks up `railway.json`, which builds the
+   `Dockerfile` (`mcr.microsoft.com/playwright/python:v1.63.0-noble` plus `uv`),
+   health-checks `/health`, restarts on failure, and runs **one replica**.
+3. Keep it at one replica. The Día account's cart is bound to its session and
+   jobs are held in memory; two replicas would share an account and split the
+   jobs.
 
-`POST /api/deposit` goes through `lib/deposit-gate.ts` first, and `POST
-/api/card` re-checks that the código it is handed belongs to a wallet that got
-through. Four states, and what each means at the checkout:
+### 2.2 Variables
 
-| State | How you get it | At the checkout |
-|---|---|---|
-| **open** | not production, no list | pays with no signature — what keeps `next dev` painless, and what preview runs on |
-| **allowlist** | the list is non-empty | on the list, and signs once before the deposit screen |
-| **public** | `REAL_MODE_OPEN_TO_ALL` set | anybody, and **still signs once** |
-| **disabled** | production, empty list | refused, before an amount or an address is quoted |
+| Variable | Value |
+|---|---|
+| `SANDBOX_TOKEN` | `openssl rand -hex 32`. Unset, `/jobs` answers 503 |
+| `TYPESAFE_API_KEY` | TypeSafe API key, for Jev |
+| `DIA_ARG_EMAIL`, `DIA_ARG_PWD`, `DIA_ARG_DNI` | the operator's Día account. Typed from the environment and redacted from everything the model sees |
+| `DIA_ARG_POSTCODE` | the delivery postcode checkout asks for |
+| `PORT` | leave it; Railway sets it and the image defaults to 8080 |
 
-One signature, taken before any money moves, and not asked for again at the
-card. A proof lives five minutes and a deposit can take longer than that to
-confirm, so a second one would refuse a shopper who has already sent real USDC
-— the worst available moment to fail, and one that ends in a manual refund.
+### 2.3 Expose it and connect the app
 
-`REAL_MODE_OPEN_TO_ALL=1` drops the list and lets any wallet pay. Same yes-words
-as the faucet's old switch, and deliberately a separate variable. **It drops the
-list, not the signature**: "anybody may pay" and "nobody has to prove who they
-are" are different sentences and only the first is on offer, which costs a
-signed-in shopper one tap and costs a script the whole exercise.
+1. **Settings → Networking → Generate Domain.**
+2. Check it: `curl https://<railway-domain>/health`.
+3. In Vercel, set `SANDBOX_URL=https://<railway-domain>` and
+   `SANDBOX_TOKEN` to the **same** value as on Railway. Remove `SANDBOX_MOCK`.
+4. Redeploy the web app so the new variables take effect.
 
-Two things that are **not** variables, and will stop a first real payment dead:
+A sandbox restart drops its in-memory jobs. The app sees a 404 on the next
+status poll and refunds, which is the intended behaviour, not a bug.
 
-1. **`DEPOSIT_ADDRESS_MAINNET` needs a USDC trustline** before anyone pays into
-   it. A classic asset cannot reach an account that has not opted in, and the
-   payment fails at submit. Check it:
+To run it locally instead, see `services/sandbox/README.md`, and point
+`SANDBOX_URL` at `http://localhost:8080`.
 
+## Part 3 — the escrow program on devnet
+
+Only needed to deploy your own copy. The committed one is live:
+
+| | |
+|---|---|
+| Program | [`9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet) |
+| USDC mint | [`9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet) |
+| Resolver | [`AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5`](https://solscan.io/account/AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5?cluster=devnet) |
+| Treasury | [`EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS`](https://solscan.io/account/EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS?cluster=devnet) |
+
+### 3.1 Toolchain
+
+- Rust and the Solana CLI (Agave), with `cargo build-sbf`.
+- Platform tools **v1.52** — `cargo build-sbf --tools-version v1.52`. Older
+  ones cannot parse the edition-2024 crates in the dependency tree.
+- Anchor CLI 0.32, for `anchor idl build`.
+- Node 22.12+.
+
+### 3.2 Keys
+
+All keys live in **`~/.config/solana/changuito/`** and are **never committed**:
+
+| File | Role |
+|---|---|
+| `deployer.json` | pays for the deploy and `initialize`; the smoke run's buyer |
+| `program.json` | the program's address keypair |
+| `resolver.json` | signs settle, refund and faucet mints, and pays the fee for every shopper's `open`; the mint authority. Its contents become `SOLANA_RESOLVER_SECRET` |
+| `treasury.json` | where settled USDC lands. The app never signs for it |
+
+```bash
+mkdir -p ~/.config/solana/changuito
+for k in deployer program resolver treasury; do
+  solana-keygen new --no-bip39-passphrase -o ~/.config/solana/changuito/$k.json
+done
+solana airdrop 5 $(solana-keygen pubkey ~/.config/solana/changuito/deployer.json) --url devnet
+```
+
+If the airdrop is rate-limited, transfer devnet SOL from another funded wallet,
+or use the web faucet. The resolver also needs a little SOL: it pays fees for
+`open`, settle, refund and the faucet, and the faucet's 0.01 SOL top-ups.
+Every checkout draws on it, so check its balance before a demo.
+
+### 3.3 A new copy needs code edits first
+
+The committed addresses are baked in, so a fresh copy is not one command:
+
+1. **Program id.** Set `declare_id!` in
+   `anchor/programs/changuito_escrow/src/lib.rs` to
+   `solana-keygen pubkey ~/.config/solana/changuito/program.json`.
+2. **Mint.** No script creates it. Create a 6-decimal mint with the resolver as
+   mint authority:
    ```bash
-   node scripts/check-deposit-account.mjs mainnet
+   spl-token create-token --decimals 6 \
+     --mint-authority $(solana-keygen pubkey ~/.config/solana/changuito/resolver.json) \
+     --fee-payer ~/.config/solana/changuito/deployer.json --url devnet
    ```
+3. **`scripts/solana-init.mts`** hard-codes `PROGRAM`, `MINT` and `TREASURY`.
+   Replace all three.
 
-   It reports whether the account exists, whether the trustline is there, and
-   whether the asset matches the issuer in `deployments.json` — Circle's
-   `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN` on mainnet. The
-   buyer's own trustline the app handles, as a one-time step in the payment
-   screen.
-2. **A 3DS-capable BIN on the Vyrion account.** An empty list is a 502 *after*
-   the deposit has landed, which is the wrong order to find out in.
+### 3.4 Build, deploy, initialize, smoke
 
-Three more Vyrion questions only a live key answers, listed because they decide
-whether a kept card is one object topped up or a new card each basket: does
-`POST /cards/{id}/fund` raise the spendable balance on a card created without a
-`spending_limit`; does a card created *with* a limit refuse to fund past it
-(there is no update-limit endpoint, which is why the persistent path sets none);
-and does `fundCard` implicitly un-freeze. `allowedCategories` is set at creation
-and unchangeable, so a standing balance stays locked to `5411,5499,5311`.
+```bash
+./scripts/solana-deploy.sh            # or: npm run deploy:devnet
+SKIP_BUILD=1 ./scripts/solana-deploy.sh   # redeploy the .so already built
+```
 
----
+The script:
 
-## Part 3 — the agent's model
+1. builds with `cargo build-sbf --tools-version v1.52` and writes the IDL with
+   `anchor idl build` (skipped with `SKIP_BUILD=1`);
+2. `solana program deploy` with `program.json` as the id and `deployer.json`
+   paying;
+3. runs `scripts/solana-init.mts`: `initialize(resolver, treasury)` once
+   (skipped if Config exists), then a smoke **open → settle** and
+   **open → refund** with the deployer as buyer, then writes
+   `deployments.json`;
+4. runs `scripts/write-deployments-module.mjs`, which regenerates
+   `apps/web/lib/deployments.ts` — addresses plus the `EVIDENCE` signatures.
 
-One model answers every hop: `claude-sonnet-5`, from `ANTHROPIC_API_KEY`. That
-is the whole of it, and it is worth a short section only because of what used
-to be here.
+`npm run devnet:init` runs step 3 without the smoke. `npm run program:build`
+is step 1 alone. `SOLANA_RPC_URL` overrides the RPC for all of it.
+
+Config is set once by `initialize`; there is no instruction to change the
+resolver or treasury afterwards. Rotating either means a new program.
+
+### 3.5 Commit what changed
+
+`deployments.json` and `apps/web/lib/deployments.ts`, plus the edits from 3.3.
+Never the keys. Then update `SOLANA_RESOLVER_SECRET` on Vercel if the resolver
+changed, and redeploy the web app.
+
+## Part 4 — the agent's model
+
+One model answers every hop: `claude-sonnet-5`, from `ANTHROPIC_API_KEY` —
+unless `OPENAI_API_KEY` is set, in which case `lib/agent/providers/openai.ts`
+answers instead (`OPENAI_MODEL`, default `gpt-4.1`). The choice follows the key,
+so there is no mode variable to forget. Set one key, not both, unless you mean
+OpenAI. The rest of this part is about the Anthropic path, and worth a section
+only because of what used to be here.
 
 **There was a local model.** Inference ran on a Mac at home over a Cloudflare
 Tunnel, with the hosted model catching whatever the machine could not take —
@@ -462,13 +322,13 @@ machine is really being used. So a deployment that removed `OLLAMA_URL` and
 left `AGENT_PROVIDER` behind asked for a model that could no longer be reached
 and forbade the only fallback: every turn died at the first hop with *"El
 modelo local no está disponible"*. Two variables that had to agree, set in two
-different moments. There is now one, and nothing left to disagree with it.
+different moments. There is no such pair now: the provider is chosen by which key exists.
 
 `AGENT_PROVIDER`, `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_HEADERS`,
 `OLLAMA_LANES`, `OLLAMA_FIRST_BYTE_MS` and `OLLAMA_KEEP_ALIVE` are read by
 nothing. Delete them from Vercel; leaving them is harmless but misleading.
 
-### 3.1 The two knobs that are left
+### 4.1 The two knobs that are left
 
 | | Default | |
 |---|---|---|
@@ -482,7 +342,7 @@ is a small, well-posed step with the tool schemas in front of it, which is not
 work that rewards deliberation. `medium` restores what shipped before; move
 this first if baskets start coming back wrong rather than slow.
 
-### 3.2 What the turn actually costs
+### 4.2 What the turn actually costs
 
 Two cache breakpoints, and they are not decoration — the second one is most of
 the latency on a long basket.
@@ -501,7 +361,7 @@ the latency on a long basket.
 `AGENT_USAGE=1` logs `cache_read` and `cache_write` per hop to the server
 console, which is how you check the second one is working rather than assuming.
 
-## Part 4 — www.changuito.me
+## Part 5 — www.changuito.me
 
 The marketing site is a second Vercel project. It is `apps/landing`
 (`@changuito/landing`), not a route inside `apps/web`. Do not point

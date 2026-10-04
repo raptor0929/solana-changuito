@@ -2,10 +2,9 @@
 
 import { useEffect, useId, useRef } from 'react';
 
-import { receiveCopy, trustlineCopy } from '../lib/mode-copy.ts';
+import { receiveCopy } from '../lib/mode-copy.ts';
 import { useLang } from './LangProvider';
 import { qrPicture } from '../lib/qr.ts';
-import type { TrustlineState } from '../lib/trustline.ts';
 import { CopyField } from './CopyField';
 
 /**
@@ -13,49 +12,30 @@ import { CopyField } from './CopyField';
  *
  * Both halves matter and they are for two different people in the same person.
  * The QR is for the one holding a phone with Lemon open, who would otherwise
- * type fifty-six base32 characters into a withdrawal form. The text is for the
+ * type forty-odd base58 characters into a withdrawal form. The text is for the
  * one on a laptop, who cannot photograph their own screen — and it is the
- * **whole** address, not `GDVS…NEZK`, because a truncated address is a thing
+ * **whole** address, not `EV5c…ZPS`, because a truncated address is a thing
  * you can read and not a thing you can use.
  *
- * The QR encodes the bare address and nothing else. A SEP-7 `web+stellar:`
- * URI carries more — the asset, an amount — and is understood by Stellar
+ * The QR encodes the bare address and nothing else. A Solana Pay `solana:`
+ * URI carries more — the token, an amount — and is understood by Solana
  * wallets, but the scanner this is actually pointed at belongs to an exchange's
  * withdrawal form, which wants a destination and would paste the scheme and
  * the query string into it as if they were part of the account. Bare also means
  * the code and the text below it are the same value, so there is one thing to
  * be right about rather than two.
  *
- * Presentational, like FaucetConfirm: the trustline is opened by a signature
- * from `usePollar()`, and the caller owns that. This gets the state and a
- * callback.
+ * Presentational, like FaucetConfirm. On Solana there is no trustline to
+ * open: the faucet creates the USDC account, and so does any sender.
  */
-export function ReceiveModal({
-  address,
-  trustline,
-  enabling,
-  enableError,
-  onEnable,
-  onClose,
-}: {
-  address: string;
-  /** From the balance read. `needed` means a transfer would bounce — see lib/trustline.ts. */
-  trustline: TrustlineState;
-  enabling: boolean;
-  enableError: string | null;
-  onEnable: () => void;
-  onClose: () => void;
-}) {
+export function ReceiveModal({ address, onClose }: { address: string; onClose: () => void }) {
   const lang = useLang();
   const receive = receiveCopy(lang);
-  // `trustline` is the prop above, so the copy for it needs a different name.
-  const tl = trustlineCopy(lang);
   const titleId = useId();
   const leadId = useId();
   const dialog = useRef<HTMLElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
 
-  const needsTrustline = trustline === 'needed';
   const qr = qrPicture(address);
 
   useEffect(() => {
@@ -136,32 +116,9 @@ export function ReceiveModal({
 
         <p className="pay-warn">{receive.warn}</p>
 
-        {/* The other way this arrives as nothing, and the only one we can fix
-            from here. PaymentModal opens the line too, but at pay time — which
-            is after the money was supposed to have landed. */}
-        {needsTrustline ? (
-          <div className="pay-step">
-            <strong>{tl.title}</strong>
-            <p>{tl.body}</p>
-            {enableError ? <p className="pay-error">{tl.failed}</p> : null}
-          </div>
-        ) : null}
-
         <div className="modal-actions">
-          {needsTrustline ? (
-            <button
-              ref={primary}
-              type="button"
-              className="btn"
-              data-testid="receive-trustline"
-              onClick={onEnable}
-              disabled={enabling}
-            >
-              {enabling ? tl.working : tl.action}
-            </button>
-          ) : null}
           <button
-            ref={needsTrustline ? undefined : primary}
+            ref={primary}
             type="button"
             className="btn btn-ghost"
             data-testid="receive-close"

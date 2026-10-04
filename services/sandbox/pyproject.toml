@@ -1,0 +1,11 @@
+[project]
+name = "changuito-sandbox"
+version = "0.1.0"
+description = "Jev + Playwright shopping sandbox for changuito (from raptor0929/jev-dia-arg)"
+requires-python = ">=3.12"
+dependencies = [
+    "playwright>=1.63.0",
+    "typesafe-sdk>=0.7.2",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
