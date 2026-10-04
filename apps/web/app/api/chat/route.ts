@@ -10,7 +10,7 @@ import { requireHuman } from '@/lib/human-gate';
 import { readLoggedInUser, requireLoginOrFreeTurn } from '@/lib/login-gate';
 
 /**
- * Node, not edge: the MCP server reads `node:url` and the Stellar SDK needs
+ * Node, not edge: the MCP server reads `node:url` and @solana/kit needs
  * real crypto. Edge would fail at import, not at request time, which is a
  * confusing way to find out.
  */
@@ -62,7 +62,7 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // Guests: at most FREE_TURNS chat POSTs per sessionId (server-side). Logged-in
-  // users (chg_user cookie from /api/session/login after Pollar) skip the limit.
+  // users (chg_user cookie from /api/session/login after Privy login) skip the limit.
   const loginGate = await requireLoginOrFreeTurn(req, body.sessionId);
   if (loginGate) return loginGate;
 

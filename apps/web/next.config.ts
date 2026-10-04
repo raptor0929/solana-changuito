@@ -5,6 +5,10 @@ import { appSecurityHeaders, fixtureSecurityHeaders, FIXTURE_PATH } from './lib/
 const config: NextConfig = {
   // www already drops it; there is no reason to advertise the framework.
   poweredByHeader: false,
+  // The build checks the app; `npm run typecheck` checks the app and the
+  // tests. Split since the Solana move, when several frozen tests began to
+  // reference Stellar modules that no longer exist (see CLAUDE.md on tests).
+  typescript: { tsconfigPath: 'tsconfig.build.json' },
   async headers() {
     // Order matters: a later rule's value wins for the same header key, so
     // the fixture's relaxed frame-ancestors has to come second. Outside
@@ -25,11 +29,7 @@ const config: NextConfig = {
   // Bundling it is only safe because `@changuito/mcp/server` has no reference
   // to the checkout module — not even a dynamic one, which a bundler would
   // resolve at build time anyway. See packages/mcp/src/server.ts.
-  // The two bindings packages are `stellar contract bindings typescript`
-  // output, published from src/ with no dist — see scripts/fixup-bindings.mjs.
-  // They are TypeScript, so they must be compiled here rather than treated as
-  // ready-made node modules.
-  transpilePackages: ['@changuito/mcp', '@changuito/escrow-bindings', '@changuito/usdc-bindings'],
+  transpilePackages: ['@changuito/mcp'],
 
   outputFileTracingRoot: new URL('../..', import.meta.url).pathname,
 

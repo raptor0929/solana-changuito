@@ -23,8 +23,7 @@ import { DEFAULT_LANG, inLang, type Lang } from './lang.ts';
 import { LOGIN_REQUIRED, LOGIN_REQUIRED_MESSAGE, loginRequiredMessage } from './login-constants';
 import type { ChatImage } from './chat-image.ts';
 import { parseEvents, type ChatRequest } from './protocol';
-import { ensureUserCookie } from './session-login';
-import type { WalletSigner } from './wallet-proof.ts';
+import { ensureUserCookie, type TokenSource } from './session-login';
 
 /**
  * One turn at a time against /api/chat, decoded from SSE.
@@ -46,10 +45,10 @@ export interface UseChatAuth {
    * keeps a prueba conversation out of a real one's archived history.
    */
   network?: NetworkId;
-  /** Stellar address once Pollar has a session. Used to mint `chg_user`. */
+  /** The Privy wallet's Solana address once signed in. Used to mint `chg_user`. */
   address?: string | null;
-  /** Signs the login proof `chg_user` needs. Absent without Pollar. */
-  sign?: WalletSigner;
+  /** The Privy access token `chg_user` is minted from. Absent without Privy. */
+  sign?: TokenSource;
   /**
    * Which language the footer is set to. Sent with the turn so the agent
    * answers in it, and used for the sentences this hook writes itself.

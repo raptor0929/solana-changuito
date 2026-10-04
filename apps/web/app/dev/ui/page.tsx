@@ -1,7 +1,6 @@
 import { notFound } from 'next/navigation';
 
 import { CartCard } from '../../../components/CartCard';
-import { OrderPanel } from '../../../components/OrderPanel';
 import { ProductGrid } from '../../../components/ProductGrid';
 import { Fixtures } from './Fixtures';
 
@@ -30,10 +29,6 @@ export default function DevUi() {
 
         <ProductGrid items={PRODUCTS} note="4 opciones de leche descremada en 1414" />
         <CartCard cart={CART} handoffUrl="https://diaonline.supermercadosdia.com.ar/checkout/" />
-        {/* The payment modal needs a Pollar session, so it is not here. The
-            panel only needs an order, and it is the screen a user sees while
-            they are away at the store — worth being able to look at. */}
-        <OrderPanel order={ORDER} />
       </div>
     </main>
   );
@@ -101,16 +96,3 @@ const CART = {
   messages: ['El precio de "Pan Lactal Bimbo Artesano 500 g" cambió desde la búsqueda.'],
 };
 
-/** A real order: the one settled in commit 14, with its actual hashes. */
-const ORDER = {
-  orderId: '20f8af41e9932bbf0d2d3c00bde344a087d3d0c1c8f9a2c0045f97f9fb736e6e',
-  buyer: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-  basketHash: '09f717841992aabcb6a6925fdae396718d5e9b2c43b6bb35330429523ed89798',
-  amountUnits: '34400000',
-  hash: 'a72b4f33bc155b8de1b2f2c15a975b31a04048a3bc6f881bc306e8a1080782a2',
-  retailer: 'dia',
-  cartId: 'live-check-1',
-  totalDisplay: '$5.200,00',
-  handoffUrl: 'https://diaonline.supermercadosdia.com.ar/checkout/',
-  network: 'testnet',
-} as const;

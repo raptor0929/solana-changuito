@@ -1,8 +1,14 @@
 # Basic flows
 
-The paths that matter, in the order a shopper meets them. Flows 1–5 are the
-live product. Flow 6 is the escrow, which is deployed and tested and **not on
-the shopper's path** — it is here because it is real code somebody will find.
+The paths that matter, in the order a shopper meets them. Everything here runs
+on **Solana devnet**: the escrow program, our own devnet USDC mint, and a Privy
+embedded wallet per shopper. Every on-chain step links to Solscan
+(`https://solscan.io/tx/<sig>?cluster=devnet`).
+
+One sentence to hold onto while reading: **no order is placed at Día.** The
+sandbox browser fills a real Día cart and walks checkout to the card form, and
+stops there. Reaching that form is what settles the escrow; the shopper
+finishes the purchase at Día through their own cart link. Flow 3 says why.
 
 ---
 
@@ -72,288 +78,357 @@ Details worth knowing:
 ```
 1. GREETING   what the agent can do, and three starter prompts
 2. RESEARCH   "buscando leche…", tool trail, then a product grid
-3. RESULTS    the recommended items, a cart card, and the real Día link
-4. CHECKOUT   the store's own checkout, framed — flows 3 to 5
-5. RECEIPT    what was paid, the explorer link, and a link to the order
+3. RESULTS    the recommended items, and a cart card with a Pagar button
+4. CHECKOUT   a three-step dialog: Entrar → Bloquear USDC → Comprar  (flows 2–4)
+5. DONE       "¡Compra completada!", an "Abrir en Día" link, and Solscan
+              links for the lock and the release — or "No pudimos completar
+              la compra" and the refund link
+6. RECEIPT    a receipt card at the end of the chat, and the order in
+              "Mis compras", read from the chain (flow 6)
 ```
+
+A guest can chat without signing in: three turns per session
+(`FREE_TURNS` in `lib/login-constants.ts`), then the chat asks for a login.
+Paying always needs one.
 
 ---
 
-## 2. Funding a wallet (testnet, and no longer on the shopper's path)
+## 2. Signing in
 
-The faucet route is live and gated, but the **Fondear** button that calls it
-now renders only in `/dev/ui` — preview pays from the demo wallet instead, so a
-visitor never needs a balance of their own. Kept here because the route is one
-of the four SEP-53 gates and because the ordering below is the interesting part.
+Email only. Privy creates an embedded Solana wallet on first login, so a
+shopper needs no prior wallet, seed phrase or SOL.
 
-Two steps, and the order is the point.
-
-```
-[Fondear]  ──►  POST /api/faucet { address, proof }
-                   │
-                   │ 0. SEP-53 proof, then the allowlist — deny-by-default
-                   │      in production
-                   │
-                   │ 1. friendbot, if XLM < 5
-                   │      an address nobody funded is just a public key: every
-                   │      transaction it signs fails with tx_no_source_account,
-                   │      which reads like a bug in the app rather than an
-                   │      empty wallet
-                   │
-                   │ 2. usdc.mint(to, 50.0000000)   ── resolver signs, it is
-                   │      the token admin
-                   │
-                   ▼
-                { xlm, usdc, usdcDisplay, txHash, created }
-                   │
-                   ▼
-                useBalances().refresh()
+```mermaid
+sequenceDiagram
+  participant B as Browser (PrivyProvider)
+  participant P as Privy
+  participant S as /api/session/login
+  B->>P: email + one-time code
+  P-->>B: session, embedded Solana wallet (createOnLogin: all-users)
+  B->>B: getAccessToken()
+  B->>S: POST { token }
+  S->>P: verify ES256 JWT against the app's JWKS (jose)
+  S->>P: GET /api/v1/users/{sub}  (Basic appId:PRIVY_APP_SECRET)
+  P-->>S: linked_accounts → the Solana wallet Privy created
+  S-->>B: Set-Cookie chg_user (HMAC, httpOnly), { address }
 ```
 
-Doing it the other way round hands someone money they cannot spend.
-
-- Grant is **50 demo USDC**; the route short-circuits above **100** held, with a
-  **60s per-address cooldown**. The cooldown is in memory on purpose — it exists
-  to stop a stuck button making one hot key sign fifty transactions, not to stop
-  a determined adversary.
-- **Smart wallets have no Horizon account**, so `xlm` comes back `null` for
-  them and only the mint runs.
-- The demo token is a **SEP-41 contract, not a classic asset**: there is no
-  `CODE:ISSUER` and nothing to `changeTrust` to, so a mint to an address that
-  has never existed just works. That is why the faucet can be one button.
-
-This mints the *Soroban* demo token, which is what the escrow and the balance
-panel speak. The deposit rail takes the **classic** testnet USDC and needs a
-trustline first — `lib/trustline.ts`. Two assets, two rules; [stellar.md](stellar.md#why-testnet-has-a-classic-usdc-of-its-own)
-has why.
+- **The address comes from Privy, not from the browser.** The server reads the
+  user's linked Solana wallet itself (`lib/privy-server.ts`), so the cookie
+  names a wallet Privy vouches for. Every route after this — chat limits,
+  quote, start, status, orders, faucet — reads the address from the cookie
+  via `readLoggedInUser` (`lib/login-gate.ts`), never from a request body.
+- **Two callers race the same login** (the wallet widget and the chat), so the
+  mint is awaitable and de-duplicated per address (`lib/session-login.ts`).
+- **`CHG_SESSION_SECRET` signs the cookie.** Unset in production, the login
+  route answers 503 and nobody can sign in. Locally it falls back to a dev
+  constant, which is also what `scripts/devnet-e2e.mts` uses to mint a cookie
+  for a throwaway keypair.
+- **`@privy-io/node` is deliberately not used**: it pins `@solana/kit` 5
+  against the 8 the app uses. A JWT check and one REST call are the whole
+  dependency.
 
 ---
 
-## 3. Checkout, step one: the store, read from outside
+## 3. Checkout: quote, lock, shop, settle
 
-The checkout is Día's own, in an iframe, and **the app cannot see into it**:
-different origin, so no DOM, no URL, no completion event. Everything the app
-knows about the basket it learns by asking the store's *public* cart document
-by id, server-side, with no cookies.
+The order of these steps is the design. The money moves into a program-owned
+vault **before** anyone spends effort shopping, and out of it only on what the
+server reads from the chain and the sandbox — never on what the browser says.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant API as Next.js routes
+  participant C as Solana devnet (escrow)
+  participant SB as Sandbox (Railway)
+  participant D as Día
+  B->>API: POST /api/checkout/quote { cart, handoffUrl }
+  API-->>B: orderId, amount, basketHash, timeoutSecs 3600, programId, usdcMint
+  B->>B: build v0 `open` tx (lib/checkout/open-tx.ts)
+  B->>C: Privy signAndSendTransaction(sponsor: true)
+  Note over C: USDC buyer → vault PDA ["vault", order_id]<br/>Order PDA ["order", order_id] created
+  B->>API: POST /api/checkout/start { orderId, openSig }
+  API->>C: read Order PDA: buyer, status, amount, basket_hash
+  API->>SB: POST /jobs { order_id, items }
+  loop every 3s
+    B->>API: GET /api/checkout/status?orderId=
+    API->>SB: GET /jobs/{id}
+    SB->>D: login → empty_cart → shop → checkout → stop at payment
+  end
+  alt reached_payment
+    API->>C: settle(basket_hash, receipt_hash)  (resolver)
+    API-->>B: stage done + handoffUrl + closeSig
+  else failed / job lost / could not start
+    API->>C: refund()  (resolver)
+    API-->>B: stage refunded + closeSig
+  end
+```
+
+### 3a. The quote
+
+`POST /api/checkout/quote` turns the cart on screen into the arguments of
+`open`:
 
 ```
-BROWSER                      /api/order/verify           DÍA (public API)
-   │
-   │ CheckoutModal mounts the frame ONCE and never unmounts it.
-   │ Re-mounting reloads the store and loses what was typed.
-   │
-   │ every few seconds, while the shopper works:
-   ├─ POST { retailer, handoffUrl } ──►│
-   │                                   │ GET /api/checkout/pub/orderForm/{id}
-   │                                   ├──────────────────────────────────►│
-   │                                   │  ◄── the cart document ───────────│
-   │                                   │
-   │                                   │ identified  = profile has an email
-   │                                   │ payable     = payableTotal(of)
-   │                                   │               items + envío − dtos
-   │                                   │ breakdown   = totalizerBreakdown(of)
-   │                                   │ slotChosen  = every logistics group
-   │                                   │               has a selectedSla
-   │                                   │ orderGroup  = present once the order
-   │                                   │               exists
-   │   ◄── { identified, items, payable, breakdown, slotChosen, orderRef } ─┤
-   │
-   │ stage = login → delivery → pay → card
+orderId    = crypto.getRandomValues(32)          random, NOT derived
+basketHash = sha256(canonicalBasket(cart))       lib/order.ts
+amount     = arsToUsdCents(total, arsPerUsd, 0.15)  @changuito/mcp/fx
+             (ARS_PER_USD pins the rate; otherwise the live feed)
+timeout    = 3600s
 ```
 
-- **No PII crosses that function.** The profile is read and discarded inside
-  `lib/order-check.ts`; only `verdict.state` leaves it, and that is a closed
-  union of literals. `verdict.why` and the collected store messages are *not*
-  returned, because they embed names and item descriptions.
-  `lib/test/order-check.test.ts` pins this — 17 tests, several of which exist
-  only to fail if a name or an address ever appears in the response.
-- **`identified` is a hint, never proof.** A VTEX profile object exists before
-  it is filled in, so the check is `Boolean(clientProfileData?.email)`.
-- **`orderGroup` is the one unambiguous success signal.** An emptied cart is
-  not evidence: a cart id nobody ever used returns the same shape.
+- **The 15% is for envío**, which the store only reveals at checkout — after
+  the money is locked. It is float, not price, and on settle it goes to the
+  treasury with the rest. That is a demo simplification and is stated as one.
+- **`basket_hash` commits to the exact basket** — retailer, cart id, each
+  line's index, SKU, quantity, line total and availability, and the total —
+  as a versioned line-oriented text, not `JSON.stringify`, because a hash is a
+  promise about bytes and key order is an accident of whoever built the
+  object. The USDC amount is deliberately not in it: the program stores that
+  as its own field.
+- **`order_id` is random.** `open` rejects an id it has seen, which stops a
+  double submit; a deliberate retry of the same basket must be a new order.
+- The quote is stored server-side (`lib/checkout/store.ts`: Upstash Redis,
+  24h TTL, an in-process Map without credentials) together with the
+  shopper's own cart link, `handoffUrl`.
+
+### 3b. The lock
+
+The browser builds the `open` transaction with the buyer as fee payer and
+hands the bytes to Privy with `sponsor: true`. **Privy pays the fee. It does
+not pay rent**: `open` creates the Order account and the vault token account,
+about 0.004 SOL between them, and the buyer pays that — which is why the
+faucet sends 0.01 SOL with the USDC (flow 5). The vault's rent comes back to
+the buyer when it closes; the Order account stays on chain as the record.
+
+If the balance is short of the quote, the dialog shows **Cargar 50 USDC de
+prueba** next to the lock button, and the lock button stays disabled until
+the balance covers it.
+
+### 3c. Start: believe the chain, not the browser
+
+`POST /api/checkout/start` reads the Order PDA (retrying, since a fresh
+transaction can lag one RPC node behind another) and refuses unless:
+
+| Check | Refusal |
+|---|---|
+| the account exists | 409 *Todavía no vemos el pago en la red.* |
+| `buyer` = the cookie's wallet | 403 |
+| `status` = open | 409 |
+| `amount` ≥ the quoted amount | 409 |
+| `basket_hash` = the quoted hash | 409 *El changuito bloqueado no es el cotizado.* |
+
+Only then does it start a sandbox job. It is idempotent: a second call for an
+order that already has a job returns its status. If the sandbox cannot be
+started at all, the record is marked `jobId: 'none'` and the next status poll
+refunds.
+
+### 3d. The sandbox shops
+
+`services/sandbox` ([sandbox.md](sandbox.md)) is a Python worker: Jev
+(TypeSafe's System One model, which answers typed questions and never
+generates text) picks among the visible controls, and Playwright executes the
+choice on Día's real site, in four phases. The dialog shows each one:
+
+| Phase | Shown as |
+|---|---|
+| `queued` | En la fila para comprar… |
+| `login` | Entrando a Día… |
+| `empty_cart` | Vaciando el carrito de Día… |
+| `shop` | Cargando los productos en Día… |
+| `checkout` | Pasando por la caja… |
+| `payment` | Llegando al pago… |
+
+It **stops at the card form**. It is never offered a "comprar / confirmar /
+pagar" control, and the order and payment endpoints (`/transaction`,
+`/payments`, `gatewayCallback`, `orderPlaced`) are aborted at the network
+level. One job at a time, because there is one operator Día account and its
+cart is bound to its session.
+
+Without `SANDBOX_URL` (local development) an in-process mock walks the same
+phases on a clock — login 0s, empty_cart 4s, shop 7s, checkout 15s, payment
+20s — and reports `reached_payment`. `SANDBOX_MOCK_FAIL=1` makes it fail at
+checkout, which is the refund path. In production without `SANDBOX_URL` the
+checkout is off unless `SANDBOX_MOCK=1`.
+
+### 3e. Settle, and the handoff
+
+When a poll finds `reached_payment`, the status route settles:
+
+```
+receipt = canonicalReceipt(order, buyer, basket, amount, settledAt)
+          with basis|sandbox-reached-payment
+          + job|<sandbox job id>
+          + orderform|<the sandbox's own Día orderFormId>
+settle(basket_hash, sha256(receipt))      resolver-signed
+   vault → treasury, vault closed (rent → buyer), status Settled,
+   receipt_hash stored on the Order account
+```
+
+The shopper sees **¡Compra completada!**, an **Abrir en Día** button, and
+Solscan links for the lock (*Bloqueo*) and the release (*Liberación*).
+
+**Abrir en Día opens the shopper's own cart**, the `handoffUrl` the agent got
+from `get_cart_link` (`…/checkout/?orderFormId=…#/cart`) — **not** the
+sandbox's cart. The sandbox's cart belongs to the operator's Día account;
+opening it would show the shopper somebody else's profile and address. Its
+`orderFormId` goes into the receipt hash as evidence, and nowhere on screen.
+
+What "settled" means, precisely: *the agent proved this basket could be
+carried to Día's payment step.* It is not *Día confirmed an order*. The
+shopper still pays Día at the store, from the handoff link.
+
+### 3f. Close is idempotent
+
+A poll that arrives twice cannot close twice. The status route reads the
+Order account first and only writes if it is still open; an in-process set
+guards one close per order per instance; and the program itself rejects a
+second close with `OrderClosed`. A sandbox that answers 5xx or cannot be
+reached is not yet a failure — the route keeps polling.
 
 ---
 
-## 4. Checkout, step two: the quote and the payment
+## 4. The refund path
 
-The order of the three steps *is* the design. The USDC is charged **after** the
-shopper picks a delivery slot, because until then the total does not include
-envío and the shopper would be charged a number the súper will not.
-
-```
-BROWSER                          /api/deposit                 STELLAR
-   │
-   │ identified && slotChosen && payable > 0, once:
-   ├─ POST { retailer, handoffUrl, network, address, proof } ─►│
-   │                                   │
-   │                                   │ deposit-gate: SEP-53 proof, then the
-   │                                   │   allowlist — before anything is quoted
-   │                                   │ payable read from the STORE, server-side.
-   │                                   │   the client's own figure is ignored
-   │                                   │   whenever the store can be asked
-   │                                   │ arsToUsdCents(payable) + FX buffer
-   │                                   │ raise to CARD_MIN_CENTS
-   │                                   │ refuse above the shared card's ceiling
-   │                                   │ openChatOrder(...) → reuses the memo
-   │   ◄── { address, amount, memo (el código), display } ─────┤
-   │
-   │ shown as:  Productos $16.345,00
-   │            Envío      $1.200,00
-   │            Total     $17.545,00  ≈ 17,54 USDC
-   │
-   │ ONE PRESS — never automatic:
-   │   Pollar sends the payment ──────────────────────────────────────────►│
-   │   or the shopper sends it themselves to the address + memo shown      │
-   │   or, in preview, POST /api/deposit/demo signs with the demo wallet   │
-   │
-   │ poll every 4s:
-   ├─ GET /api/deposit?memo=… ────────►│ lib/pay → activeLedger(): payments
-   │                                   │   destination · asset code AND issuer
-   │                                   │   · amount in stroops · memo
-   │                                   │ markPaid(memo)  — monotonic, best effort
-   │   ◄── { confirmed: true, hash } ──┤
+```mermaid
+stateDiagram-v2
+  [*] --> Open: open() — buyer signs
+  Open --> Settled: settle() — resolver, basket hash matches
+  Open --> Refunded: refund() — resolver any time, or buyer after deadline
+  Settled --> [*]
+  Refunded --> [*]
 ```
 
-- **The charge is a button, always.** What the app does automatically is read
-  the total; it never takes the money. A shopper who does not want to pay in
-  crypto is never charged.
-- **The amount is read server-side.** The browser never names its own price.
-- **Re-quoting is safe.** `openChatOrder` amends the amount on an existing
-  unclaimed order and **reuses the memo**, so changing the delivery slot does
-  not strand money on a dead código.
-- **GET holds no state and can be asked forever.** It proves the money arrived,
-  not that it has not been spent — the once-only claim lives in flow 5.
-- **A database that is down costs a record, not a payment.** The ledger port is
-  the authority in both halves (Horizon today).
+Refund happens when the job reports `failed` (or `done` without reaching
+payment), when the sandbox answers 404 for the job (it keeps jobs in memory,
+so a restart loses them), or when the job could not be started. The resolver
+signs `refund()`: vault → buyer's USDC account, vault closed, status
+Refunded. The dialog says **No pudimos completar la compra** / *El escrow
+devolvió tus USDC a tu billetera* and links the refund on Solscan
+(*Devolución*).
+
+Both terminal states are final: an order closes once, and a refunded order
+cannot then be settled. The program also lets **the buyer** refund their own
+order once the deadline (1 hour after `open`) has passed — the escape hatch if
+the backend never comes back. That instruction exists and is tested on
+devnet; there is no button for it in the app yet.
+
+Evidence, from `scripts/devnet-e2e.mts` with `SANDBOX_MOCK_FAIL=1`:
+[open](https://solscan.io/tx/2vaNKpBuuYbnfgT3gaZwr2gwcKbYLjgrP2dfAZBzr2PgheuXuHEDedVSkoHdhL6ZDsW88mofSZPjkyFKYvDXHbCZ?cluster=devnet) →
+[refund](https://solscan.io/tx/244i1SqumYySTLBSFkEnPRN6KFEqBDWNEC9GQfPU9zEdsouRYVuwdPgtAGYMVY2BULq8KoEsPruPCqrDMyYVExKP?cluster=devnet).
+The settle path from the same script:
+[faucet](https://solscan.io/tx/36qKsuaGykkY9NyrkGG4PKNArByv6fXJtf5bBNNj2sUoQ1cV7DGebdqZJnLXmkdEncZjkRoncaCFDeo6zWUzgqzL?cluster=devnet) →
+[open](https://solscan.io/tx/5aShGUf3h1cJvNuLDUNZXjpBCBEf18bHkq8GpkcnN1D4yJaumBfNJkqNacRqMkBYq7r4FvEtnrTK1ZyRAyLze35Z?cluster=devnet) →
+[settle](https://solscan.io/tx/32qUpErth2AG72KvXPCNSDX5NY9ftwsaH7u6SYSpZaB3N6b6Kz8csjhAWpNckTdsEkH53HPBQk2eySDrsjGR9a4K?cluster=devnet)
+(5.06 USDC for a $6.150 ARS basket at 1400 ARS/USD + 15%).
+
+**One gap, stated.** Settle and refund are triggered by the status poll, and
+the only poller is the open checkout dialog. A shopper who closes the dialog
+mid-purchase leaves the order Open: the sandbox job keeps running, but nothing
+closes the escrow until the dialog polls again, or the buyer refunds after the
+deadline. A server-side sweeper is the fix and is not built.
 
 ---
 
-## 5. Checkout, step three: the card, and the receipt
+## 5. Funding a wallet: the devnet faucet
+
+Our USDC is our own devnet mint
+([`9rYNCiaa…tAtdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet),
+6 decimals), and the resolver is its mint authority, so the faucet is one
+resolver-signed transaction:
 
 ```
-BROWSER                            /api/card                   STELLAR / DB
-   │
-   ├─ POST { memo, network, address, proof } ──►│
-   │                                            │ read the ledger for a payment
-   │                                            │   carrying the código
-   │                                            │ amount ← THAT payment, not the
-   │                                            │   request body
-   │                                            │ claim the deposit exactly once:
-   │                                            │   UPDATE … WHERE card_id IS NULL
-   │                                            │
-   │                                            │ preview:    a per-basket card,
-   │                                            │   spending_limit = the deposit,
-   │                                            │   terminated when done
-   │                                            │ production: ONE card per wallet.
-   │                                            │   a second deposit funds the
-   │                                            │   first — claim first, then fund
-   │   ◄── { cardId, last4, importe } ──────────┤
-   │
-   │ GET /api/card/{id}/details  ── PAN + CVV, shown and never stored
-   │ POST /api/card/3ds { memo } ── the código the súper's bank sends,
-   │                                keyed on the memo, never on a card id,
-   │                                counted down because it expires in ~3 min
-   │
-   │ shopper pays at Día with the card
-   │
-   ├─ "Ya lo pagué" ──► re-check /api/order/verify
-   │      orderGroup present → real evidence
-   │      payable moved      → name BOTH numbers, charge nothing, refund
-   │                           nothing, and still show the card
-   │
-   ├─ POST /api/order/done { memo } ── paid|carded → done. It cannot mark an
-   │                                   order paid, which is why it needs no
-   │                                   signature
-   │
-   ▼
-   receipt in localStorage + the purchases list, linking the payment on
-   stellar.expert and the order at the store (`{orderGroup}-01`)
+[Cargar 50 USDC de prueba]  ──►  POST /api/faucet      (no body)
+                                    │
+                                    │ 0. human gate (Turnstile), then the
+                                    │    chg_user cookie — the address is
+                                    │    the cookie's, never the body's
+                                    │ 1. faucetVerdict(balance, lastGrant)
+                                    │      ≥ 100 USDC held → 429, "ya tenés"
+                                    │      < 60s since last → 429, "esperá"
+                                    │
+                                    │ ONE transaction, resolver-signed:
+                                    │   create the USDC ATA (idempotent)
+                                    │   mintTo 50 USDC
+                                    │   + 0.01 SOL, if the wallet holds
+                                    │     < 0.006 SOL
+                                    ▼
+                                 { usdc, usdcDisplay, txHash, created }
 ```
 
-- **The PAN, the CVV and the 3DS code never touch storage.** Not localStorage,
-  not sessionStorage, not a Playwright trace — the e2e spec asserts all three
-  and sets `trace: 'off', video: 'off', screenshot: 'off'` because this repo is
-  public.
-- **The card is funded by an operator, not by this code.** Vyrion answers
-  `403 "Contact support via email to enable your API"` on every endpoint, so
-  one card was created by hand and `shared_card` hands it to the wallets on
-  `shared_card_member`. **No copy claims a load happened** — the panel says what
-  the importe is, and stops there.
-- **The `-01` suffix on the order link is inferred**, from VTEX's single-seller
-  convention. Día is single-seller. A wrong guess degrades to the order *list*,
-  which is what shipped before.
+- **The SOL is rent, not fees.** Privy sponsors fees; it does not pay for the
+  accounts `open` creates. Without the SOL a fresh wallet holds USDC and
+  cannot open an order with it. One transaction means a shopper never ends up
+  with one and not the other.
+- The policy is pure and tested (`lib/faucet-policy.ts`): grant 50, stop at
+  100 held, 60s cooldown. The cooldown is per instance and in memory on
+  purpose — it stops a stuck button making one hot key sign fifty
+  transactions, not a determined adversary.
+- The faucet appears in two places: the wallet widget, and inside the checkout
+  dialog when the balance is short of the quote.
 
 ---
 
-## 6. Dormant: the escrow
+## 6. What I bought: the purchases list
 
-Everything below is deployed on testnet, covered by 19 tests, and reachable
-only from `/dev/ui`. No shopper path calls it. Kept because bringing it back is
-a concrete next step — see
-[stellar.md](stellar.md#the-escrow-contract-dormant).
-
-### 6a. Opening
+`GET /api/checkout/orders` reads the escrow program, not a database:
 
 ```
-orderId    = crypto.getRandomValues(32)      random, NOT derived
-basketHash = sha256(canonicalBasket(cart))   32 bytes
-
-escrow.open(buyer, order_id, amount, basket_hash, timeout_secs)
-    buyer.require_auth()          ── one approval, which also covers the
-                                     transfer out of the buyer's balance
-    amount > 0                    ── else InvalidAmount
-    300s ≤ timeout ≤ 30d          ── else InvalidTimeout
-    order_id unseen               ── else OrderExists
-    USDC: buyer ──► contract
-    emit Opened{…}
+getProgramAccounts(program, filters: [
+  memcmp(offset 0,  Order discriminator),
+  memcmp(offset 40, buyer = the cookie's wallet),
+])
+→ decodeOrder → newest first, at most 50
+→ { orderId, amountDisplay, status: open|settled|refunded, openedAt,
+    explorer: Solscan link to the Order account }
 ```
 
-- **`basket_hash` is what makes this more than a transfer.** It commits to the
-  exact items, quantities, per-line and total pesos, and which lines the store
-  said were unavailable — as a versioned, line-oriented text, not
-  `JSON.stringify`, because a hash is a promise about bytes and object key order
-  is an implementation detail of whoever built the object.
-- The **USDC amount is deliberately not in the hash**: the contract stores it as
-  its own field, so hashing it too would be a second copy that can disagree.
-- **`order_id` is random, not derived from the basket.** `open` rejects an id it
-  has seen, which is what stops a double submit — but a deliberate second
-  attempt at the same basket (the first failed in the wallet) must be a new
-  order, or it would be rejected for the wrong reason.
-- **Arguments are positional** and `order.test.ts` reads the signature out of
-  `lib.rs` to check them, because two swapped `BytesN<32>` arguments type-check,
-  deploy, and then settle the wrong basket.
+The chain is the record, so the list is the same on every device, survives a
+cleared browser, and needs no `DATABASE_URL`. Shown as *En curso*,
+*Completada* or *Devuelta* in "Mis compras" (`components/Purchases.tsx`).
 
-### 6b. Settling and refunding
+Separately, the chat that paid gets a receipt card (localStorage,
+`chat-store.ts`) with the lines and total as they were on screen, and the chat
+becomes read-only: one chat is one order.
 
-```
-escrow.settle(order_id, basket_hash, receipt_hash)
-    cfg.resolver.require_auth()
-    status must be Open              ── else OrderClosed
-    basket_hash must match           ── else BasketMismatch
-    status ← Settled, receipt stored
-    USDC: contract ──► treasury
+---
 
-escrow.refund(caller, order_id)
-    resolver, any time  ──  or the buyer, after the deadline. Nobody else,
-    ever, even once the deadline has passed  ── else NotAuthorized
-    USDC: contract ──► buyer
-    emit Refunded{ self_service }    ── true means the backend never came back
-```
+## 7. Receiving: the QR
 
-The status is written **before** the transfer, in both: a token whose
-`transfer` re-enters the contract must find the order already closed.
+Clicking the short address in the wallet widget opens
+`components/ReceiveModal.tsx`: the
+shopper's whole Solana address as a QR (the bare address, nothing else) and a
+copy field. It is how someone sends devnet USDC or SOL to a Privy wallet from
+another wallet. Nothing server-side is involved.
+
+---
+
+## 8. The escrow program, in one screen
+
+`anchor/programs/changuito_escrow/src/lib.rs`, Anchor 0.32, deployed at
+[`9A2PXJaf…eXB2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet).
+The full account layout and the client are in [solana.md](solana.md).
 
 ```
-                   open()
-        (none) ──────────────► Open
-                                │ │
-                settle() ───────┘ └─────── refund()
-                   │                          │
-                   ▼                          ▼
-                Settled                    Refunded
+initialize(resolver, treasury)        once; Config PDA ["config"] holds
+                                      resolver, treasury, mint. No admin
+                                      or upgrade path in-program
+open(order_id, amount, basket_hash, timeout_secs)       buyer signs
+    amount > 0                        else InvalidAmount
+    300s ≤ timeout ≤ 30d              else InvalidTimeout
+    order_id unseen                   else (init fails: account exists)
+    Order PDA ["order", order_id]; vault PDA ["vault", order_id],
+    owned by the Order PDA; USDC buyer → vault; emit Opened
+settle(basket_hash, receipt_hash)     resolver only
+    status Open                       else OrderClosed
+    basket_hash matches               else BasketMismatch
+    vault → treasury, close vault (rent → buyer), status Settled,
+    store receipt_hash; emit Settled
+refund()                              resolver any time, or buyer after
+                                      deadline; anyone else NotAuthorized
+    vault → buyer, close vault, status Refunded; emit Refunded{self_service}
 ```
 
-Terminal in both directions: an order can only be closed once, and a refunded
-order cannot then be settled. The 19 tests reconcile balances exactly across
-`open → settle` and `open → refund`, cover every rejection above, and assert
-that a rejected call leaves no event behind.
+The status is written **before** the transfer in both closes.

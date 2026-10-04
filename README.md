@@ -1,97 +1,146 @@
 # changuito
 
-**An agent that shops Argentine supermarkets and pays in USDC on Stellar.**
+**An AI agent that does your Argentine supermarket shop, paid in USDC on Solana,
+with the money held in an on-chain escrow until the agent proves it could buy
+the basket.**
 
-You ask for a basket in plain Spanish. It searches a real store over MCP,
-compares real prices, builds a real cart, and then hands you the store's own
-checkout — inside the app. You pay the exact total in USDC, envío included, and
-changuito gives you a card number to type into the súper's payment form.
+You ask for a basket in plain Spanish. The agent searches a real store's live
+catalogue, compares real prices and builds a real cart. You pay in USDC from an
+email login, without a seed phrase or gas. The USDC is locked in an escrow
+program on Solana. A sandboxed browser agent then walks the store's own checkout
+with that basket. If it reaches the payment step, the escrow settles. If it
+fails, the escrow refunds you, and nobody has to approve that by hand.
 
 *changuito* is what an Argentine calls a shopping trolley.
 
 | | |
 |---|---|
-| **Try it** | [app.changuito.me](https://app.changuito.me) — no wallet needed to shop |
-| **Marketing site** | [www.changuito.me](https://www.changuito.me) |
-| **Reviewing this?** | **[docs/judges.md](docs/judges.md)** — a 15-minute path through the repo, and what to check |
+| **Hackathon** | Crypto World's Fair (Solana Foundation × Colosseum) — branch `feat/solana-devnet` |
+| **Network** | **Solana devnet only**: our own mock USDC mint, faucet in the app |
+| **Reviewing this?** | **[docs/judges.md](docs/judges.md)**: a 15-minute path through the repo, with claims mapped to evidence |
+| **Videos** | Pitch: _link pending_ · Demo: _link pending_ (sources in [`creatives/`](creatives/)) |
 | **License** | MIT |
-
-> **Two products, one bundle.** Signed out, you are in **preview**: testnet, and
-> we pay from a wallet we hold. Signed in with Pollar, you are in
-> **production**: mainnet, real USDC, your wallet. Nothing toggles that — the
-> Pollar session *is* the crossing. See [`lib/app-mode.ts`](apps/web/lib/app-mode.ts).
 
 ---
 
-## The problem
+## Who this is for
 
-An Argentine supermarket takes pesos through a card form. Somebody holding
-dollars on Stellar cannot pay with them, and the gap is not a swap — it is the
-whole last mile: the store wants a card, at a peso amount that is not known
-until a delivery slot is picked, from a person whose profile the store already
-holds.
+**The first customer is someone who holds dollars, and has a family in Argentina
+that needs groceries.** The emigrant in Madrid, the freelancer paid in USDC, the
+expat whose parents live in Rosario. Today they send money and then make a phone
+call about what to buy. With changuito they say *"armá la compra de la semana
+para mi vieja, sin TACC, hasta $80.000"* and pay. The agent does the shop at the
+supermarket nearest the delivery address.
 
-changuito closes that last mile without asking the store to change anything and
-without taking custody of the shop. The store's real checkout runs in the app.
-The money moves on Stellar. A card bridges the two.
+That person has three things in common:
+
+1. They hold **USDC, not pesos**, and want to keep it that way until the moment
+   of purchase.
+2. They **cannot use an Argentine crypto card**. Lemon, Belo and the other local
+   cards are issued to Argentine residents with local KYC, and they solve paying,
+   not shopping.
+3. They are **paying for something they will not see arrive**, which is why the
+   money sits in escrow rather than being handed to us.
+
+The second customer, later, is an Argentine already paid in stablecoins who wants
+the week's shop done without opening four supermarket apps. The first customer is
+narrower and needs the product more, so it is the one we build for now.
+
+### "Why not just use a crypto card?"
+
+Because the card was never the product. A crypto card lets you **pay** a
+supermarket. It does not **build the basket**, compare four chains' prices, notice
+that the 1.5 L costs less than two 750 ml bottles, or handle a substitution when
+something is out of stock. Choosing what to buy takes 40 minutes; paying takes
+about 40 seconds. changuito does the 40 minutes.
+
+The card also gives the payer nothing to hold onto. Once you have paid, a
+failed delivery means you dispute it with the issuer. With changuito the funds
+are in a program account that can only go to one of two places: the treasury,
+once the basket is proven at checkout, or back to the buyer. That rule is
+enforced by the program, not by us (see [On chain](#what-is-on-chain-and-why)).
+
+And for the first customer above, a local card is not available at all.
+
+---
 
 ## What the shopper does
 
 ```mermaid
 flowchart TD
-    A["#quot;armá un desayuno por menos de $10.000#quot;"] --> B[Agent searches Día over MCP<br/>real catalogue, real prices]
-    B --> C[A real cart, and the store's own cart link]
-    C --> D[Store checkout opens <b>inside</b> the app]
-    D --> E["1 · Entrá a tu cuenta<br/><i>the shopper signs in to Día themselves</i>"]
-    E --> F["2 · Elegí el envío<br/><i>changuito reads the cart server-side</i>"]
-    F --> G["3 · Pagá el importe<br/><b>exact total, envío included</b> → USDC"]
-    G --> H[Payment lands on Stellar<br/>matched by memo, read from Horizon]
-    H --> I[Card number shown<br/>typed into the súper's own form]
-    I --> J[Receipt, linked to the store order]
+    A["#quot;armá un desayuno por menos de $10.000#quot;"] --> B["Agent searches Día over MCP<br/>live catalogue, live prices"]
+    B --> C["A real cart, drawn as a card<br/>with the store's own cart link"]
+    C --> D["Pagar → email login with Privy<br/><i>embedded Solana wallet, no seed phrase</i>"]
+    D --> E["Lock USDC in escrow<br/><i>gas sponsored by Privy</i>"]
+    E --> F["Sandbox agent fills the same basket on Día<br/>login → cart → checkout → payment step"]
+    F -->|reached payment| G["settle: vault → treasury<br/>¡Compra completada! + handoff link"]
+    F -->|failed / lost| H["refund: vault → buyer"]
 ```
 
-The order of those three steps is the whole point, and it used to be wrong: the
-USDC was quoted before a delivery slot existed, so it excluded envío. `cart.total`
-is the goods subtotal *by design* — see
-[`orderform.ts`](packages/mcp/src/adapters/orderform.ts). Now nothing is quoted
-until the store itself says what the basket costs.
+```mermaid
+stateDiagram-v2
+    [*] --> Open: open() — buyer signs, USDC buyer → vault
+    Open --> Settled: settle(basket_hash, receipt_hash)<br/>resolver only, hash must match
+    Open --> Refunded: refund()<br/>resolver any time, or buyer after deadline
+    Settled --> [*]
+    Refunded --> [*]
+```
+
+The buyer never depends on the operator to get their money back. If our server
+disappears, `refund()` opens to the buyer themselves once the deadline passes.
 
 ---
 
-## What is on Stellar, and what it is doing
+## What is on chain, and why
 
-Full detail in **[docs/stellar.md](docs/stellar.md)**. The short version:
+Full detail in **[docs/solana.md](docs/solana.md)**.
 
-| | Doing |
+| | Address (Solscan, devnet) |
 |---|---|
-| **Classic USDC payment + memo** | the money rail. One payment to an operator account, identified by a `código` in the memo. No contract, no server signing key, no custody of anything but the deposit account |
-| **Horizon** | the *only* confirmation source. `lib/deposit-watch.ts` reads the public ledger — there is no webhook to miss and no secret to hold. Anyone can verify a deposit themselves |
-| **SEP-53 signed messages** | identity, everywhere it matters. Every gate that can spend real money checks a signature over a message naming the address, not an address the browser claims |
-| **SEP-41 Soroban token** | `contracts/mock_usdc` — the testnet demo token, admin-gated mint. It backs the faucet route and the escrow, and deliberately *not* the deposit rail: a contract token has no classic payment record for a memo to ride on |
-| **SEP-7 URI** | the receive screen's payment link |
-| **Soroban escrow** | `contracts/escrow` — deployed, 19 tests, **dormant**. See below |
-| **Pollar wallet** | login, the address, the SEP-53 signature, and the USDC payment |
-| **stellar.expert** | every transaction the app shows is linked to the explorer |
+| **Escrow program** `changuito_escrow` (Anchor 0.32) | [`9A2PXJaf…B2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet) |
+| **Config PDA** `["config"]`: resolver, treasury, mint. Set once; the program has no setter | [`BfMWiygm…yTQ`](https://solscan.io/account/BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ?cluster=devnet) |
+| **Mock USDC** (6 decimals, minted by the in-app faucet) | [`9rYNCiaa…tdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet) |
+| **Resolver**: settles, refunds, mints faucet USDC | [`AgTnHC9d…qQ5`](https://solscan.io/account/AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5?cluster=devnet) |
+| **Treasury**: receives settled baskets | [`EV5c3mjE…ZPS`](https://solscan.io/account/EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS?cluster=devnet) |
 
-### Why a payment and not the escrow
+**What each piece does:**
 
-The escrow is deployed on testnet and it is good code. It is also not on the
-money rail, and the honest reason is written in
-[`lib/deposit.ts`](apps/web/lib/deposit.ts):
+- **Escrow program** ([`anchor/programs/changuito_escrow`](anchor/programs/changuito_escrow/src/lib.rs)).
+  - **`open`**: the buyer signs. It creates an order PDA `["order", id]` and a vault token account `["vault", id]`, stores the basket's SHA-256 and a deadline, and moves the USDC in. It rejects a zero amount, a timeout outside the 5-minute to 30-day range, and a reused order id.
+  - **`settle`**: callable by the resolver only. The order must be open and the basket hash must match. It pays the treasury, records a receipt hash, and closes the vault (the rent goes back to the buyer).
+  - **`refund`**: the resolver can call it at any time; the buyer can call it after the deadline.
+- **The basket hash is what makes the escrow mean something.** The program will not settle unless the resolver presents the same canonical basket the buyer locked funds against. A server that wanted to charge for a different basket would need a different hash, and the program rejects that.
+- **The chain is the order book.** "Mis compras" is a `getProgramAccounts` query filtered by buyer. There is no orders table to drift from the money.
+- **Privy** handles the email login and the embedded Solana wallet. The app signs with `signAndSendTransaction({ sponsor: true })`, so the shopper needs no SOL for fees.
+- **The in-app faucet** sends one resolver-signed transaction: it creates the USDC account, mints 50 mock USDC, and tops up 0.01 SOL. Privy sponsors fees but not rent, so that SOL pays the order and vault rent. The vault's rent goes back to the buyer when it closes; the order account stays as the on-chain record.
 
-> *The thing the order actually needs is much smaller than an escrow: the money
-> has to arrive before a card is issued against it. A classic payment with a
-> memo does that with no contract, no resolver key on the server, and nothing to
-> deploy.*
->
-> *It also means the failure path is honest. There is no automated outbound
-> payment here and no Stellar secret in the deployment, so a failed order is
-> refunded by hand. That is a worse product and a much better blast radius.*
+### Verified on devnet
 
-The escrow's `open / settle / refund` still work and are still tested — they are
-reachable from `/dev/ui`, not from the shopper's path. What it was built for, and
-the case for bringing it back on the mainnet rail, is in
-[docs/stellar.md](docs/stellar.md#the-escrow-contract-dormant).
+These are ledger entries, not screenshots:
+
+| | Transaction |
+|---|---|
+| program deploy | [`3f3caazB…`](https://solscan.io/tx/3f3caazBpPsDmcvQnKzGgdM7H1GPMeNiZoD6Z8yq7H8JX8tdrEmfXMA2gBuDSNBbRqCsq51KF6VtLCG4SQ91YjmC?cluster=devnet) |
+| `initialize` | [`3mWgS3g9…`](https://solscan.io/tx/3mWgS3g9iCju1J9p8s6563KRQfG3juVCX2mwFqURJB2oYVWzvAimMgPqxjMNsJUFY64unGUtBcwsyzsfoWUu7Xj2?cluster=devnet) |
+| app → faucet | [`36qKsuaG…`](https://solscan.io/tx/36qKsuaGykkY9NyrkGG4PKNArByv6fXJtf5bBNNj2sUoQ1cV7DGebdqZJnLXmkdEncZjkRoncaCFDeo6zWUzgqzL?cluster=devnet) |
+| app → `open` (5.06 USDC for a $6.150 ARS basket) | [`5aShGUf3…`](https://solscan.io/tx/5aShGUf3h1cJvNuLDUNZXjpBCBEf18bHkq8GpkcnN1D4yJaumBfNJkqNacRqMkBYq7r4FvEtnrTK1ZyRAyLze35Z?cluster=devnet) |
+| app → `settle` (vault → treasury) | [`32qUpErt…`](https://solscan.io/tx/32qUpErth2AG72KvXPCNSDX5NY9ftwsaH7u6SYSpZaB3N6b6Kz8csjhAWpNckTdsEkH53HPBQk2eySDrsjGR9a4K?cluster=devnet) |
+| app → `open` (failure path) | [`2vaNKpBu…`](https://solscan.io/tx/2vaNKpBuuYbnfgT3gaZwr2gwcKbYLjgrP2dfAZBzr2PgheuXuHEDedVSkoHdhL6ZDsW88mofSZPjkyFKYvDXHbCZ?cluster=devnet) |
+| app → `refund` (vault → buyer) | [`244i1Squ…`](https://solscan.io/tx/244i1SqumYySTLBSFkEnPRN6KFEqBDWNEC9GQfPU9zEdsouRYVuwdPgtAGYMVY2BULq8KoEsPruPCqrDMyYVExKP?cluster=devnet) |
+
+The "app →" rows were produced by [`scripts/devnet-e2e.mts`](scripts/devnet-e2e.mts),
+which drives the real API routes (faucet → quote → open → start → status) against
+the dev server, with the sandbox in mock mode. Reproduce it:
+
+```bash
+# terminal 1
+SOLANA_RESOLVER_SECRET="$(cat ~/.config/solana/changuito/resolver.json)" npm run dev
+# terminal 2
+node --experimental-strip-types --no-warnings scripts/devnet-e2e.mts
+```
+
+The dev server needs the resolver key to settle and refund. Without it you can
+still read everything above on Solscan.
 
 ---
 
@@ -100,60 +149,51 @@ the case for bringing it back on the mainnet rail, is in
 ```mermaid
 flowchart TB
     subgraph B["BROWSER"]
-        direction TB
-        CH[Chat<br/><i>SSE transcript, product grids, cart cards</i>]
-        CM[CheckoutModal<br/><i>login · envío · importe, then the card</i>]
-        IF["Store checkout <b>iframe</b><br/><i>cross-origin: unreadable</i>"]
-        PW[PollarProvider<br/><i>login · address · SEP-53 · pay</i>]
+        CH["Chat<br/><i>SSE transcript, product grids, cart card</i>"]
+        CM["CheckoutModal<br/><i>login · lock · shopping · done</i>"]
+        PV["Privy<br/><i>email login · embedded wallet · sponsored send</i>"]
     end
 
-    subgraph N["NEXT.JS ON VERCEL — Node runtime, never edge"]
-        direction TB
-        CHAT["/api/chat<br/><i>Anthropic tool loop, streamed</i>"]
-        MCP["MCP Client ⇄ McpServer<br/><i>InMemoryTransport — real tools/call</i>"]
-        VER["/api/order/verify<br/><i>reads the shopper's cart, cookie-free</i>"]
-        DEP["/api/deposit<br/><i>quotes the exact total, watches Horizon</i>"]
-        CARD["/api/card<br/><i>one card per customer</i>"]
+    subgraph N["NEXT.JS (Node runtime)"]
+        CHAT["/api/chat<br/><i>Claude tool loop, streamed</i>"]
+        MCP["MCP client ⇄ supermarket MCP server<br/><i>InMemoryTransport</i>"]
+        Q["/api/checkout/quote · start · status"]
+        F["/api/faucet · /api/balance"]
+    end
+
+    subgraph S["RAILWAY"]
+        SB["services/sandbox<br/><i>FastAPI + Playwright + Jev<br/>one job at a time</i>"]
     end
 
     subgraph X["OUTSIDE"]
-        direction TB
-        VTEX["Día's VTEX API<br/><i>catalogue, cart, public orderForm</i>"]
-        HOR["Stellar — Horizon + Soroban RPC"]
-        VY["Card issuer"]
-        PG[("Postgres<br/><i>orders · chats · cards</i>")]
-        RD[("Upstash Redis<br/><i>turn history, 1h</i>")]
+        VTEX["Día (VTEX): catalogue, cart"]
+        SOL["Solana devnet<br/>escrow program · mock USDC"]
+        RD[("Upstash Redis<br/>turns, quotes")]
     end
 
-    CH -->|"POST /api/chat"| CHAT
-    CHAT --> MCP --> VTEX
+    CH --> CHAT --> MCP --> VTEX
     CHAT --> RD
     CH --> CM
-    CM --> IF
-    IF -.->|"the shopper types here;<br/>the app cannot read it"| VTEX
-    CM -->|"is the cart ready?"| VER --> VTEX
-    CM -->|"quote, then watch"| DEP --> HOR
-    PW -->|"pays"| HOR
-    CM --> CARD --> VY
-    CARD --> PG
-    DEP --> PG
+    CM --> PV -->|"open (sponsored)"| SOL
+    CM --> Q
+    Q -->|"verify order PDA"| SOL
+    Q -->|"POST /jobs, poll"| SB --> VTEX
+    Q -->|"settle / refund (resolver)"| SOL
+    F --> SOL
 ```
 
-**The cross-origin wall is the central design constraint.** The store's checkout
-runs in an iframe and the app cannot read its DOM, its URL, or whether it
-finished. So every reading of the shopper's cart is taken **server-side** from
-VTEX's *public* `orderForm` endpoint, with no cookies — the total, whether a
-delivery slot was picked, and `orderGroup`, which is the one unambiguous signal
-that an order exists. Nothing about the shopper's profile ever crosses back out
-of that read; `lib/test/order-check.test.ts` pins that as a rule.
+**Trust boundaries:**
 
-**The MCP server is the other half of the point.** `packages/mcp` is a real
-Model Context Protocol server for four Argentine VTEX supermarkets — it was
-written first, and changuito exists to drive it from something other than a chat
-client. The web app speaks to it over `InMemoryTransport`: the actual protocol
-(`initialize`, `tools/list`, `tools/call`) with a pair of queues instead of a
-pipe. Its checkout half opens a headed browser on the host, so it cannot run on
-Vercel at all — three independent barriers keep Playwright out of the lambda.
+- **The browser** holds the shopper's key (inside Privy) and signs exactly one thing: `open`.
+- **The server** holds the resolver key. That key can do only two things: settle to the treasury fixed at `initialize`, and only for the basket hash the buyer signed; or refund to the buyer.
+- **The sandbox** holds the store account's credentials and has no key at all. It reports a phase, and the server decides what that means.
+- **Before starting a job**, `/api/checkout/start` reads the order PDA from chain. Buyer, status, amount and basket hash must all match the quote. The browser's claim that it paid is never trusted.
+
+**The sandbox** ([`services/sandbox`](services/sandbox), [docs/sandbox.md](docs/sandbox.md)) is a Playwright browser driven by *Jev*. Jev is a model that answers typed questions (pick one of these elements, yes/no, a score) and never writes free text. The harness does the clicking.
+
+- It logs in, empties the cart, searches each line, adds it, and walks the checkout until it reaches the card form.
+- It is never offered a "comprar / confirmar / pagar" choice.
+- Requests to the store's order and payment endpoints are aborted at the network layer.
 
 More: **[docs/architecture.md](docs/architecture.md)**.
 
@@ -163,202 +203,153 @@ More: **[docs/architecture.md](docs/architecture.md)**.
 
 Read this before the demo, not after it.
 
-- **The card is not funded by the deposit.** The issuer's API answers `403
-  "Contact support via email to enable your API"` on every endpoint, so no card
-  is minted programmatically. One card exists, made by hand in the issuer's
-  dashboard, and its numbers are read out of a `shared_card` row by the wallets
-  on a member list. The deposit is real, the card is real, and **the link
-  between them is operator-run.** No copy in the app claims a load happened —
-  see [`lib/shared-card.ts`](apps/web/lib/shared-card.ts) and
-  `supabase/migrations/0004_shared_card.sql`.
-- **A failed order is refunded by hand.** There is no automated outbound payment
-  and no Stellar secret in the production deployment. That is a deliberate
-  trade: worse product, much smaller blast radius.
-- **The store-reading leg cannot be exercised on testnet.** Día has no test
-  environment and the `/dev/checkout` rehearsal fixture has no orderForm, so the
-  e2e covers the app's own order of operations and the mainnet leg is a hand
-  check. The checklist is in [docs/e2e.md](docs/e2e.md).
-- **The receipt's order link infers one character.** `orderRef` is
-  `${orderGroup}-01`, from VTEX's single-seller convention. Día is single-seller
-  and the guess has held, but it is a guess, and it degrades to the order *list*
-  rather than a 404.
-- **The escrow is dormant**, not deleted. See above.
-- **The store's catalogue is live.** Prices and stock on any given day are
-  whatever Día actually has.
-- **The commit dates are backdated** to the window the work was planned over.
+- **No order is placed at the supermarket.** The sandbox stops at the card step on purpose. A settle means *the agent proved it could build this exact basket at the store's checkout*. The shopper finishes at Día through the handoff link, which opens **their own** cart, built by the agent, not the sandbox's (the sandbox's cart belongs to our store account, and opening it would expose that account's profile). Paying the store from the treasury is the next step, and it is the subject of the business model below.
+- **Devnet only, with mock USDC.** The mint is ours and the faucet hands it out. Nothing in this branch touches mainnet.
+- **The 15% buffer goes to the treasury.** The quote is `ARS total ÷ rate × 1.15`, because envío is only known at checkout. On settle the whole amount moves, buffer included. A production version settles the exact amount and refunds the difference.
+- **The sandbox adds one unit per line**, and searches by product name only. It ignores `sku` and records `quantity` without applying it yet.
+- **The live sandbox does not reach checkout yet.** In a local run against Día (2026-10-04, the operator's real account) it logged in and emptied the cart, then looped in the first-add delivery modal and added 0 items. The unmodified upstream harness fails the same way, headed and headless, so the store's modal has drifted from the harness's notes. Fixing that is the next task.
+- **The sandbox is not deployed yet** at the time of writing. Locally, and in any deployment without `SANDBOX_URL`, a mock job steps through the same phases in about 20 seconds (`SANDBOX_MOCK_FAIL=1` makes it fail, to show the refund).
+- **The resolver is a single server key.** It cannot redirect funds, because the treasury and the basket hash are fixed, but it can choose *when* to settle a basket that matches. A multisig or an attestation from the sandbox is the obvious hardening.
+- **The program is upgradeable.** It is on the upgradeable loader with the deployer key (`2AF3x8xh…t15k`) as upgrade authority, so "no setter" is a property of today's code, not a guarantee. Freezing it (`solana program set-upgrade-authority --final`) is a one-line step before anything holds real money.
+- **No self-refund button yet.** The program lets the buyer refund after the deadline; the UI does not offer it, and a failed `/api/checkout/start` after `open` landed leaves the order waiting for that deadline.
+- **The Anchor program has no unit tests.** It is exercised by the deploy smoke run and the route-level e2e above.
+- **Prior work** is listed in its own section [below](#prior-work-and-what-was-built-for-this-hackathon).
 
 ---
 
-## Deployed on testnet
+## Traction
 
-Live since **2026-09-21**. `deployments.json` is the single source of truth for
-contract ids, and `stellar.test.ts` compares it against the ids baked into the
-generated bindings — so a redeploy that half-lands fails the suite rather than
-the demo.
+Honest status: **pre-traction.** There are no paying users, and devnet has no
+real money in it.
 
-| | |
-|---|---|
-| **escrow** *(dormant)* | [`CBCUESHDKRXAH4YAHOKJFRFEOIYBTU2LYJ4LCOFIGMYGNHBCPACXQ557`](https://stellar.expert/explorer/testnet/contract/CBCUESHDKRXAH4YAHOKJFRFEOIYBTU2LYJ4LCOFIGMYGNHBCPACXQ557) |
-| **demo USDC** — SEP-41, `USDC`, 7 decimals | [`CB63C7UVZ3PBALQ7IE37QU2ZX5X3UMTLJOHDRI2EW44JU26YDGLQUBJF`](https://stellar.expert/explorer/testnet/contract/CB63C7UVZ3PBALQ7IE37QU2ZX5X3UMTLJOHDRI2EW44JU26YDGLQUBJF) |
-| **resolver** — token admin, escrow resolver | [`GBGMPRHU3NW3BCXUNDNC7VSYQKS6FZKWFHSGEHHMR3G3TZOUWEDBHTFK`](https://stellar.expert/explorer/testnet/account/GBGMPRHU3NW3BCXUNDNC7VSYQKS6FZKWFHSGEHHMR3G3TZOUWEDBHTFK) |
-| **treasury** — receives settled baskets | [`GAXUICH5DZMB4ZIZVF6ETTE524RCZYRKHWLGG7EOLY6ECVD4IS6TBNZG`](https://stellar.expert/explorer/testnet/account/GAXUICH5DZMB4ZIZVF6ETTE524RCZYRKHWLGG7EOLY6ECVD4IS6TBNZG) |
+- _Usage and waitlist numbers: to be filled in by the team before submission._
+- A Stellar build of the same product was live at [app.changuito.me](https://app.changuito.me) before this port. Its guest chat (search, compare, build a cart) is how shoppers first used the agent.
 
-Network passphrase `Test SDF Network ; September 2015`, RPC
-`https://soroban-testnet.stellar.org`. The deposit accounts are configuration
-(`DEPOSIT_ADDRESS_TESTNET` / `DEPOSIT_ADDRESS_MAINNET`), not committed — mainnet
-has no contracts deployed and needs none for the payment rail.
-
-The escrow's constructor wired resolver, treasury and token in at deploy time and
-there is no setter, so who can settle and where the money lands are fixed. You do
-not have to take that from a README — ask the contract:
-
-```bash
-stellar contract invoke --network testnet \
-  --id CBCUESHDKRXAH4YAHOKJFRFEOIYBTU2LYJ4LCOFIGMYGNHBCPACXQ557 \
-  --source-account GBGMPRHU3NW3BCXUNDNC7VSYQKS6FZKWFHSGEHHMR3G3TZOUWEDBHTFK \
-  --send=no -- config
-```
-```json
-{"resolver":"GBGMPRHU…DBHTFK","token":"CB63C7UV…LQUBJF","treasury":"GAXUICH5…S6TBNZG"}
-```
-
-`--send=no` only simulates, so it signs nothing, costs nothing, and any funded
-account will do as `--source-account`.
-
-## Verified on testnet
-
-Not by inspection — these are ledger entries:
-
-| | |
-|---|---|
-| escrow open | [`a72b4f33…`](https://stellar.expert/explorer/testnet/tx/a72b4f33bc155b8de1b2f2c15a975b31a04048a3bc6f881bc306e8a1080782a2) — 3.44 USDC buyer → escrow |
-| escrow settle | [`3410b8a0…`](https://stellar.expert/explorer/testnet/tx/3410b8a01e913b4613a5c23568392ad3d707e29f42bbdf0aa7a02cb09f3e68c3) — escrow → treasury, receipt recorded |
-| escrow refund | [`a64fb38a…`](https://stellar.expert/explorer/testnet/tx/a64fb38ac495112ff0fbc798fb45df67f945a4781cd80d6334155496581627c8) — escrow → buyer, balance back to the stroop |
-| faucet | [`03baa469…`](https://stellar.expert/explorer/testnet/tx/03baa469c514406487ea29c32da076d8c8af7725c2a67fb73f5f8ad056ca215a) — friendbot, then 50 USDC minted |
-
-And the escrow receipt is checkable by hand. The settle above stored
-`881ae41cb172e10778dd6810e5c3e9be5fef54b266cb0686f4da446109f978d0`, which is:
-
-```bash
-printf 'changuito/receipt/v1\nretailer|dia\ncart|live-check-1\nhandoff|https://diaonline.supermercadosdia.com.ar/checkout?orderFormId=live-check-1\nsettled|2026-09-21T07:22:14.394Z\n' | shasum -a 256
-```
+The next test is the narrow one: **ten diaspora households paying for one
+weekly shop for family in Argentina**, with the treasury paying the store. That
+answers the only question that matters at this stage: will someone abroad trust
+an agent with their parents' groceries if the money is escrowed?
 
 ---
 
-## Setup
+## Business model and card economics
 
-Requires **Node ≥ 22.12** (`.nvmrc` pins 22.12.0). For the contracts, Rust with
-the `wasm32v1-none` target and the
-[Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli).
+The basket moves through three hands: buyer → escrow → treasury → store. Margin
+is made in the middle, and the costs are on the last hop.
+
+| | Hypothesis to test |
+|---|---|
+| **Revenue: service fee** | A flat percentage on the basket, shown at quote time. A shopper abroad compares it with the cost of a remittance plus a phone call, not with a free supermarket app |
+| **Revenue: FX** | The quote converts at a published rate. The buffer that today covers envío becomes an explicit, refunded-if-unused line |
+| **Cost: paying the store** | The treasury pays Día's checkout with a card funded from settled USDC. Card issuance and interchange is the main variable cost, and the reason the fee cannot be zero |
+| **Cost: the agent** | One Claude conversation per basket, plus one sandbox run. Measured per basket, both are well under a typical delivery fee |
+| **Risk held** | None for the shopper, by construction. Funds are locked before work starts and leave only by `settle` (basket proven) or `refund`. The treasury carries the gap between settle and the store's card charge |
+
+The escrow is what lets this run without a credit line. We never pay a store
+before the buyer's money is locked against that exact basket.
+
+### Comparable projects, and how this differs
+
+From Colosseum's archive (via Colosseum Copilot):
+
+- **[SP3ND](https://colosseum.com/projects/explore/sp3nd)** (Cypherpunk, 5th place Stablecoins) buys physical goods on Amazon and other sites with stablecoins. It has the same "stablecoins in, retail goods out" shape, but for global e-commerce and with no agent choosing the basket.
+- **[Latinum Agentic Commerce](https://colosseum.com/projects/explore/latinum-agentic-commerce)** (Breakout, 1st place AI) is payment middleware for MCP agents. It is the closest on architecture; changuito is a vertical application of it, built around one store category and its checkout.
+- **[LocalPay](https://colosseum.com/projects/explore/localpay)** (Breakout, 3rd place Stablecoins) and **[Ripe](https://colosseum.com/projects/explore/ripe-1)** (Renaissance, 4th place DeFi & Payments) bring stablecoin spending to emerging-market merchant rails. Both solve paying; changuito solves shopping.
+
+What none of them does is hold the shopper's money **against a hash of the
+basket** while an agent proves it can be bought.
+
+---
+
+## Growth path
+
+The market is narrow on purpose. Each step reuses what the last one built:
+
+1. **Día, then the other three VTEX chains in Argentina.** `packages/mcp` already speaks Carrefour, Disco and Jumbo (search and cart). The sandbox is the per-store piece: one navigation profile per checkout.
+2. **Other categories on the same stack.** Pharmacies and electronics in Argentina run on VTEX too. The agent, the escrow and the handoff do not change; the catalogue and the checkout profile do.
+3. **Other countries where VTEX runs grocery**, such as Brazil, Chile and Colombia, where the same diaspora pattern of family abroad paying for groceries at home exists.
+
+---
+
+## Prior work, and what was built for this hackathon
+
+Stated plainly, so nobody has to work it out from the commit history:
+
+- **`packages/mcp`** (supermercado-mcp: VTEX search and cart tools for Día, Carrefour, Disco and Jumbo) **predates the hackathon**. It was vendored into this repo when the repo started on 2026-09-12.
+- **changuito was first built on Stellar**: a Soroban escrow, the Pollar wallet, and a deposit-and-card payment rail. The chat agent, the cart UI and the MCP bridge come from that version.
+- **The sandbox harness** in `services/sandbox` comes from [`raptor0929/jev-dia-arg`](services/sandbox/UPSTREAM.md), credited in place. What is new here is the job server (`server.py`), the `run_job` API, and the deploy files.
+- **New in this branch, for Crypto World's Fair:**
+  - the Anchor escrow program and its devnet deployment;
+  - the mock USDC mint and faucet;
+  - Privy login and gas sponsorship, replacing Pollar;
+  - the escrow-guarded checkout (`/api/checkout/*`, `CheckoutModal`), replacing the iframe and card flow;
+  - the sandbox job service and the server's settle/refund logic;
+  - the order history read from chain;
+  - these docs.
+
+---
+
+## Run it locally
+
+Requires **Node ≥ 22.12** (`.nvmrc`). The program is already deployed to devnet,
+so you only need Rust and Anchor to change it.
 
 ```bash
-git clone https://github.com/raptor0929/changuito
-cd changuito
+git clone https://github.com/Simonethg/changuito && cd changuito
+git checkout feat/solana-devnet
 npm install
-
 cp apps/web/.env.example apps/web/.env.local
-# fill in ANTHROPIC_API_KEY; everything else is optional to start
-
 npm run dev            # http://localhost:3124
 ```
 
-**It degrades rather than breaking.** With only `ANTHROPIC_API_KEY` set you get
-search, comparison, carts and the store handoff. Without
-`NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` the masthead reads *"Billetera: sin
-configurar"* instead of a balance. Without `DATABASE_URL` the card and order
-tables are simply absent and every reader answers "nothing" — deliberately, not
-defensively. Without `KV_REST_API_*` conversation history falls back to an
-in-process `Map`.
+| Variable | Needed for |
+|---|---|
+| `ANTHROPIC_API_KEY` | the agent (search, compare, cart). Enough on its own to try the chat |
+| `NEXT_PUBLIC_PRIVY_APP_ID` + `PRIVY_APP_SECRET` | login and wallet; the secret is needed server-side to look up the user's Solana wallet. The Privy app needs email login, Solana embedded wallets, devnet gas sponsorship, and `http://localhost:3124` as an allowed origin |
+| `SOLANA_RESOLVER_SECRET` | faucet, settle, refund. The resolver keypair (JSON byte array or base58) |
+| `CHG_SESSION_SECRET` | the session cookie. Required in production; a dev default is used locally |
+| `SANDBOX_URL` / `SANDBOX_TOKEN` | the real sandbox. Unset → mock job |
+| `ARS_PER_USD` | optional; pins the rate for a reproducible quote |
+| `SOLANA_RPC_URL` | optional; defaults to public devnet |
+| `KV_REST_API_URL` / `_TOKEN` | optional; history and quotes survive restarts |
 
-The contracts are already deployed; you only need to redeploy if you change
-them. See **[DEPLOY.md](DEPLOY.md)** for that and for putting it on Vercel.
-
-### Environment
-
-The annotated list is `apps/web/.env.example`. The ones that change what works:
-
-| Variable | Where | Required for |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | server | the agent |
-| `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` | browser | login, wallet, SEP-53, paying |
-| `DEPOSIT_ADDRESS_TESTNET` / `_MAINNET` | server | the deposit rail. Missing → `/api/deposit` 503s and logs the variable name |
-| `DATABASE_URL` | server | orders, kept cards, chat archive |
-| `VYRION_API_KEY` | server | card issuance (currently 403 — see the honesty section) |
-| `STELLAR_RESOLVER_SECRET` | server | the testnet faucet and the escrow |
-| `KV_REST_API_URL` / `_TOKEN` | server | conversation history across restarts |
-| `REAL_MODE_ALLOWLIST_ADDRESSES` | server | who may reach mainnet. Empty in production means nobody |
-| `FX_ARS_PER_USD` | server | optional — pins the rate for a reproducible demo |
-| `AGENT_EFFORT` | server | optional — `low` (default), `medium`, `high`. The latency knob |
-
----
-
-## Tests
+The annotated list is in [`apps/web/.env.example`](apps/web/.env.example). Deploying
+(Vercel for the app, Railway for the sandbox) is covered in **[DEPLOY.md](DEPLOY.md)**.
 
 ```bash
-npm test                    # 1178: mcp 520 · trust 2 · web 583 · landing 73
-npm run contracts:test      #   34: escrow 19 · mock_usdc 15
+npm test -w @changuito/web
 npm run typecheck -w @changuito/web
 npm run build
-npm run test:e2e            # Playwright — see docs/e2e.md
 ```
 
-The suites are treated as a fixed point rather than a formality: a change that
-only passes because its test moved with it tells you nothing once it is live, so
-a test that has to change is named out loud in the commit that changes it.
-
-Four that guard mistakes which type-check cleanly:
-
-- **`order-check.test.ts`** pins that nothing about the shopper's profile or
-  address can cross out of the server-side cart read — checked against fixtures
-  that are trimmed copies of what Día actually returned, which include an email,
-  a name and a DNI. That endpoint hands all three to anyone holding a cart id.
-- **`order.test.ts`** reads `pub fn open` out of `contracts/escrow/src/lib.rs`
-  and compares argument names, Rust types and timeout bounds against the
-  encoder. Soroban arguments are positional and two of them are `BytesN<32>` —
-  swap `order_id` and `basket_hash` and everything compiles, deploys, and then
-  settles a basket nobody approved.
-- **`stellar.test.ts`** reads the contract ids baked into the generated bindings
-  as text and compares them with `deployments.json`.
-- **`app-frame-checkout.spec.ts`** drives the whole checkout in a browser and
-  pins that the basket is quoted **exactly once**, and never before the shopper
-  has signed in — which is the property the envío bug violated. It runs with
-  `trace / video / screenshot` off, because the repo is public and the spec walks
-  past a test PAN.
-
-The contract suite covers what the money depends on: a double open is rejected,
-settling an order that was never opened is rejected, an unauthorized settle is
-rejected, a buyer refunding before the deadline is rejected, after it is allowed,
-and balances reconcile exactly across both `open → settle` and `open → refund`.
+Some web tests still pin behaviour from the Stellar version. They are listed, not
+edited, in the commit that made the port. See [CLAUDE.md](CLAUDE.md) for why the
+tests are treated as a fixed point.
 
 ---
 
 ## Layout
 
 ```
-apps/web/            the shopper — chat, checkout, card, API routes (app.changuito.me)
-apps/landing/        marketing site only (www.changuito.me)
-apps/branding/       brand kit (not an npm package): logo, mascot, manuals, social
-packages/mcp/        the supermarket MCP server (vendored, 520 tests)
-packages/trust/      footer trust copy shared by both apps, so they cannot drift
-packages/*-bindings/ generated TypeScript clients for the two contracts
-contracts/escrow/    open / settle / refund, with events — dormant
-contracts/mock_usdc/ SEP-41 token, admin-gated mint
-supabase/migrations/ orders, chats, cards — the reasoning is in the SQL
-scripts/             deploy.sh, the demo asset issuer, db migrate + invariants
-creatives/           Remotion sources for the pitch videos (ES, EN, promo)
-e2e/                 Playwright: the checkout, and smoke against the live sites
-deployments.json     what is deployed, and where — committed on purpose
+apps/web/                 the shopper: chat, checkout, API routes
+apps/landing/             marketing site
+anchor/programs/          changuito_escrow: open / settle / refund
+services/sandbox/         Jev + Playwright checkout agent, FastAPI job server (Railway)
+packages/mcp/             supermarket MCP server for four VTEX chains (prior work)
+packages/trust/           footer trust copy shared by both apps
+scripts/                  solana-deploy.sh, solana-init.mts, devnet-e2e.mts
+supabase/migrations/      chat archive schema
+creatives/                Remotion sources for the pitch videos
+deployments.json          what is deployed on devnet, and the evidence txs
 ```
-
-### Deeper documentation
 
 | | |
 |---|---|
-| **[docs/judges.md](docs/judges.md)** | reviewing this in 15 minutes: what to look at, and what to check |
-| [docs/architecture.md](docs/architecture.md) | the system, the trust boundaries, and the cross-origin wall |
-| [docs/flows.md](docs/flows.md) | a chat turn, the deposit, the card, the receipt — end to end |
-| [docs/stellar.md](docs/stellar.md) | every Stellar technology used and what each is doing |
-| [docs/tech-stack.md](docs/tech-stack.md) | the dependency list with versions, and why each one is there |
-| [docs/e2e.md](docs/e2e.md) | Playwright, and the mainnet checks the e2e cannot cover |
-| [DEPLOY.md](DEPLOY.md) | the contracts, then Vercel, then the database |
-| [CLAUDE.md](CLAUDE.md) | how the agent's behaviour was arrived at, and which decisions not to undo |
+| **[docs/judges.md](docs/judges.md)** | reviewing in 15 minutes: claims and the evidence for each |
+| [docs/architecture.md](docs/architecture.md) | system, trust boundaries, quote → open → job → settle/refund |
+| [docs/solana.md](docs/solana.md) | program accounts, instructions, auth rules, Privy, faucet |
+| [docs/sandbox.md](docs/sandbox.md) | the job API and what the sandbox will and will not do |
+| [docs/flows.md](docs/flows.md) | a chat turn and a checkout, end to end |
+| [docs/tech-stack.md](docs/tech-stack.md) | dependencies and environment |
+| [DEPLOY.md](DEPLOY.md) | devnet program, Vercel, Railway |
+| [CLAUDE.md](CLAUDE.md) | how the agent's behaviour was arrived at, and what not to undo |

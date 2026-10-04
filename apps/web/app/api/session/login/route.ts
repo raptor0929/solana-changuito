@@ -4,9 +4,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/session/login { address, proof }
+ * POST /api/session/login { token }
  *
- * Called after Pollar login with a SEP-53 proof from the wallet. Sets the
+ * Called after Privy login with the user's Privy access token. Sets the
  * signed httpOnly `chg_user` cookie that /api/chat reads. All of the checking
  * lives in lib/session-issue.ts.
  */

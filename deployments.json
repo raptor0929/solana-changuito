@@ -1,53 +1,23 @@
 {
-  "defaultNetwork": "testnet",
-  "networks": {
-    "testnet": {
-      "networkPassphrase": "Test SDF Network ; September 2015",
-      "rpcUrl": "https://soroban-testnet.stellar.org",
-      "horizonUrl": "https://horizon-testnet.stellar.org",
-      "friendbotUrl": "https://friendbot.stellar.org",
-      "explorerPath": "testnet",
-      "deployedAt": "2026-09-21T06:53:57.747Z",
-      "accounts": {
-        "resolver": "GBGMPRHU3NW3BCXUNDNC7VSYQKS6FZKWFHSGEHHMR3G3TZOUWEDBHTFK",
-        "treasury": "GAXUICH5DZMB4ZIZVF6ETTE524RCZYRKHWLGG7EOLY6ECVD4IS6TBNZG",
-        "demoWallet": "GDFF477UQUWOFIHSOEXPPOD5GPUSEW6OLGZB5FCPS6AFRAOPTMINA55X"
-      },
-      "contracts": {
-        "usdc": {
-          "id": "CB63C7UVZ3PBALQ7IE37QU2ZX5X3UMTLJOHDRI2EW44JU26YDGLQUBJF",
-          "decimals": 7,
-          "symbol": "USDC",
-          "issuer": "GCGV3225QTJFJ32KTPJNOR5SYANP4QWNUGKKGKVK7ILMK4QACZHJTGJB"
-        },
-        "escrow": {
-          "id": "CBCUESHDKRXAH4YAHOKJFRFEOIYBTU2LYJ4LCOFIGMYGNHBCPACXQ557"
-        }
-      }
-    },
-    "mainnet": {
-      "networkPassphrase": "Public Global Stellar Network ; September 2015",
-      "rpcUrl": "https://mainnet.sorobanrpc.com",
-      "horizonUrl": "https://horizon.stellar.org",
-      "friendbotUrl": null,
-      "explorerPath": "public",
-      "deployedAt": null,
-      "accounts": {
-        "resolver": "",
-        "treasury": "",
-        "demoWallet": ""
-      },
-      "contracts": {
-        "usdc": {
-          "id": "",
-          "decimals": 7,
-          "symbol": "USDC",
-          "issuer": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
-        },
-        "escrow": {
-          "id": ""
-        }
-      }
+  "cluster": "devnet",
+  "rpcUrl": "https://api.devnet.solana.com",
+  "programId": "9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9",
+  "usdcMint": "9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM",
+  "usdcDecimals": 6,
+  "resolver": "AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5",
+  "treasury": "EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS",
+  "treasuryToken": "HVsDJbwmsa2oTUpddQMSSUzKF6Z4PvQRU96d7n95owxa",
+  "config": "BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ",
+  "deployedAt": "2026-10-04T15:35:00.668Z",
+  "evidence": {
+    "deploy": "3f3caazBpPsDmcvQnKzGgdM7H1GPMeNiZoD6Z8yq7H8JX8tdrEmfXMA2gBuDSNBbRqCsq51KF6VtLCG4SQ91YjmC",
+    "initialize": "3mWgS3g9iCju1J9p8s6563KRQfG3juVCX2mwFqURJB2oYVWzvAimMgPqxjMNsJUFY64unGUtBcwsyzsfoWUu7Xj2",
+    "smoke": {
+      "fund": "2bahH3CVovSMEKLELkjJUYq1JTtnJkLcxUGSHVc4UaiSDPj5MT2cB1SCVJAX4uJfoP4z5HM2rUDryCmmEqa6Cjux",
+      "settleOpen": "5Hw7m8aq638nYbY9MY5C8bDs4XC4AjqNAESgEVpErLMcYvkMkdmrghHUtQkR2k9Ex7XfWFzVnPsyHztzmuJJFNPr",
+      "settle": "z5Qq1C15CTsqC94R3mGrgEzqr29LNstTmFm4mEr3nVb3gY2Yna7LhL3mG2EoPuosiun9NLAKG77E3tSPCFjwew8",
+      "refundOpen": "C7VcfqHYVTNAkjP8T8isTWcfVhfewHgU4U8ZZQXEDnoMtLvLoiDrVf8Te4UwKS5zg7D45PdKbfmvrK8mVTgomNz",
+      "refund": "5GtMF7JvPdcog9d7oebhdwtgfw45yPY8Nh6mS6TE5pdXmBXcYad7saFPHsxriqUry4fYLAWqqXboKAM5HjFQA47e"
     }
   }
 }

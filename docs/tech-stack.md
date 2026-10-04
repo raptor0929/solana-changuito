@@ -1,18 +1,18 @@
 # Tech stack
 
 Versions are pinned exactly where a minor bump would be a real risk — the wallet
-SDK, the chain SDK, the agent SDK — and left as ranges where it would not.
+SDK, the agent SDK — and left as ranges where it would not.
 
 ## Application
 
 | | Version | Why this one |
 |---|---|---|
-| **Next.js** | 16.3.5 | App Router, route handlers and streaming responses in one place. Every API route is `runtime = 'nodejs'` — XDR encoding and the MCP server's `node:url` import both fail on edge, and they fail at *import* time, which is a confusing way to find out. |
+| **Next.js** | 16.3.5 | App Router, route handlers and streaming responses in one place. Every API route is `runtime = 'nodejs'` — the MCP server's `node:url` import and `node:crypto` in the checkout routes fail on edge, and they fail at *import* time, which is a confusing way to find out. |
 | **React** | 19.2.0 | |
 | **TypeScript** | 5.9.3 | `strict`, `target: ES2022`. ES2023 methods like `findLastIndex` do **not** typecheck here. |
-| **Node** | ≥ 22.12 (`.nvmrc`: 22.12.0) | `@stellar/stellar-sdk@17` requires it. On Vercel the project's Node version must be set explicitly or the install fails. |
-| **`postgres`** | ^3.4.9 | the order and card records. A plain SQL client, no ORM — the schema is four migrations and the queries are the interesting part |
-| **npm workspaces** | — | `apps/*`, `packages/*`. No Turborepo, no pnpm: three apps and four packages do not need a build graph. |
+| **Node** | ≥ 22.12 (`.nvmrc`: 22.12.0) | `--experimental-strip-types` for the test suite and the `.mts` scripts. On Vercel set the project's Node version explicitly. |
+| **`postgres`** | ^3.4.9 | the chat archive only. Orders live on chain now |
+| **npm workspaces** | — | `apps/*`, `packages/*`. No Turborepo, no pnpm. |
 
 No CSS framework, no state library, no component kit. The transcript is a
 reducer in a plain file (`lib/chat-state.ts`) so the ordering rules can be
@@ -21,7 +21,8 @@ tested without a browser.
 Three apps share the workspace: `apps/web` (the shopper), `apps/landing` (the
 marketing site) and `apps/branding` (the assets). `packages/trust` exists so the
 copyright line, the registered mark and the founder attribution are written once
-and rendered by both public sites rather than drifting apart.
+and rendered by both public sites rather than drifting apart. `services/sandbox`
+is the one non-JavaScript service (Python, below).
 
 ## The agent
 
@@ -34,16 +35,21 @@ and rendered by both public sites rather than drifting apart.
 | **`@modelcontextprotocol/sdk`** | 1.30.0 | both the `Client` and the `McpServer`, linked with `InMemoryTransport` |
 | **`@upstash/redis`** | ^1.39.0 | conversation history. HTTP, not TCP — one connection per lambda is the connection-limit problem the REST API avoids |
 
-**There is one model provider.** There used to be two: a local model on a Mac at
+**One provider per deployment.** `lib/agent/loop.ts` uses Anthropic unless
+`OPENAI_API_KEY` is set, in which case `providers/openai.ts` answers instead
+(`OPENAI_MODEL`, default `gpt-4.1`). The choice is made from the key — the
+resource — not from a separate mode variable, for the reason below.
+
+There used to be a third option: a local model on a Mac at
 home over a Cloudflare Tunnel, chosen per hop behind four gates, with a wire
 translator between Anthropic's message shape and OpenAI's. It was slower than
 the thing it stood in for and it saved an API bill that was never the
 constraint, so `provider.ts`, `providers/ollama.ts`, `providers/wire.ts` and
 `providers/gate.ts` are deleted along with their tests, and `loop.ts` calls
-`anthropicProvider()` directly. `lib/agent/providers/` now holds `anthropic.ts`
-and `types.ts`.
+`anthropicProvider()` unless an OpenAI key is present. `lib/agent/providers/`
+holds `anthropic.ts`, `openai.ts` and `types.ts`.
 
-The `Provider` interface stays, with `kind` narrowed to one value: it costs one
+The `Provider` interface stays: it costs one
 indirection and it is where the model, the thinking budget and the effort level
 live, in a file that is not the loop. Two artefacts of the removal are
 deliberate and should not be tidied away — `status: 'fallback'` is still in the
@@ -51,33 +57,60 @@ wire protocol though nothing emits it, and `errorCode()` still classifies the
 two local-model sentences. [`../CLAUDE.md`](../CLAUDE.md) §5 has the outage that
 taught us why.
 
-## Stellar
+## Solana
 
 | | Version | Notes |
 |---|---|---|
-| **`@stellar/stellar-sdk`** | 17.1.0 | server-side only — it never enters the client bundle. `Horizon.Server` confirms deposits, `rpc.Server` talks to the contracts |
-| **`@pollar/react` / `@pollar/core`** | 0.11.3 (exact) | login, wallet, the SEP-53 signature and the USDC payment. Pinned exactly: Pollar self-describes as "V0" |
-| **`soroban-sdk`** | 25.3.2 | pinned to match the local `stellar` CLI at 25.1.0 |
-| **generated bindings** | — | `packages/escrow-bindings`, `packages/usdc-bindings`, produced from the **deployed** wasm by `scripts/deploy.sh` |
+| **`@solana/kit`** | ^8.4.0 | RPC, transaction building and signing, client and server. The escrow client in `lib/escrow.ts` is hand-written against it: PDAs, instruction builders, `decodeOrder` — no generated IDL client |
+| **`@solana-program/token`**, **`/system`** | ^0.17.0, ^0.15.0 | ATA creation, `mintTo`, SOL transfer (the faucet) |
+| **`@privy-io/react-auth`** | 3.47.0 (exact) | email login, the embedded Solana wallet, and `signAndSendTransaction` with `sponsor: true` |
+| **`jose`** | ^6.1.0 | verifies the Privy access token against the app's JWKS server-side. `@privy-io/node` is not used: it pins `@solana/kit` 5 |
+| **Anchor** | 0.32 (`anchor-lang`, `anchor-spl` with `token`) | the escrow program, `anchor/programs/changuito_escrow` |
+| **Platform tools** | v1.52 (`cargo build-sbf --tools-version v1.52`) | older ones cannot parse the edition-2024 crates in the dependency tree |
+| **Cluster** | devnet only | hard-coded in `lib/deployments.ts` (generated) and the deploy script, on purpose |
 
-The money rail is a classic payment with a memo, confirmed through
-`activeLedger()` (Horizon adapter today) — no contract is on it. Quote and card
-live in `lib/pay/`; the port is `lib/ledger/`. Full detail, and why, in
-[stellar.md](stellar.md).
+The money rail is the escrow program: the buyer's wallet signs `open`, the
+backend resolver signs `settle` or `refund`. Program, accounts and evidence
+transactions are in [solana.md](solana.md); the flow is in
+[flows.md](flows.md#3-checkout-quote-lock-shop-settle).
+
+| Account | Devnet address |
+|---|---|
+| Program `changuito_escrow` | [`9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet) |
+| Config PDA | [`BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ`](https://solscan.io/account/BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ?cluster=devnet) |
+| USDC mock mint (6 dp) | [`9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet) |
+| Resolver | [`AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5`](https://solscan.io/account/AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5?cluster=devnet) |
+| Treasury | [`EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS`](https://solscan.io/account/EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS?cluster=devnet) |
+
+## The sandbox service
+
+`services/sandbox` — Python 3.12, managed with `uv`. Copied from
+[raptor0929/jev-dia-arg](https://github.com/raptor0929/jev-dia-arg) and
+credited (`UPSTREAM.md`). Details in [sandbox.md](sandbox.md).
+
+| | Version | Notes |
+|---|---|---|
+| **`playwright`** (Python) | ≥ 1.63.0 | drives Chromium on Día's real site |
+| **`typesafe-sdk`** | ≥ 0.7.2 | Jev, TypeSafe's System One model. It answers typed questions (Choice / Noul / Score) about the page and never generates text; the harness executes the choice |
+| **FastAPI + uvicorn** | ≥ 0.115, ≥ 0.30 | `POST /jobs`, `GET /jobs/{id}`, `GET /health`, Bearer `SANDBOX_TOKEN` |
+| **Image** | `mcr.microsoft.com/playwright/python:v1.63.0-noble` | Chromium's system libraries come with it |
+| **Host** | Railway, one replica | one job at a time: one Día account, one session-bound cart |
 
 ## Data
 
 | Store | Holds | Lifetime |
 |---|---|---|
+| **Solana devnet** | every order: buyer, amount, basket hash, status, receipt hash | the record. Read back with `getProgramAccounts` for "Mis compras" |
 | **MCP session snapshot** | retailer, postal code, cart id | the browser holds it and sends it back each turn |
-| **Upstash Redis** | the hop loop's conversation history | 1h TTL, falls back to an in-process `Map` |
-| **localStorage** | the transcript the shopper sees, and their chat list | the browser |
-| **Postgres** | orders, deposits, cards, archived chats | the record |
+| **Upstash Redis** | the hop loop's conversation history (1h TTL); checkout records between quote and close (24h TTL) | falls back to an in-process `Map` |
+| **localStorage** | the transcript the shopper sees, their chat list, receipts | the browser |
+| **Postgres** | archived chats, signed-in wallets only | optional |
 
-Four migrations in `supabase/migrations/`, applied with `npm run db:migrate`:
-`0001_init`, `0002_order_identity`, `0003_card_face`, `0004_shared_card`.
-`npm run db:invariants` checks the ones SQL cannot state — chiefly that a
-deposit is claimed by at most one card.
+Five migrations in `supabase/migrations/`, applied with `npm run db:migrate`.
+`0001`–`0004` are from the previous build (orders, deposits, cards); nothing in
+the app writes those tables now. `0005_solana` renames the address domain to
+`wallet_address`, accepts base58 Solana keys and adds `devnet` as a network,
+with both checks `NOT VALID` so the old rows stay as a record of what was.
 
 The archive is written only for a signed-in wallet: `chat.address` is `not null`
 and reads are narrowed by it in the `WHERE` clause, because a transcript is a
@@ -119,32 +152,32 @@ Three independent barriers, because one is a boundary and three is a guarantee:
    `playwright`, `playwright-core`, `ethers`, and the compiled `checkout/` and
    `wallet/` directories.
 
-`transpilePackages` carries all four workspace packages. The MCP package is
-compiled ESM and gets **bundled rather than marked external**: a symlinked
-workspace package that Next treats as external is not traced into the lambda at
-all and fails at runtime with `MODULE_NOT_FOUND`. The two bindings packages are
-raw TypeScript published from `src/` with no `dist`, so they have to be compiled
-here.
+`transpilePackages` carries `@changuito/mcp`, which is compiled ESM and gets
+**bundled rather than marked external**: a symlinked workspace package that
+Next treats as external is not traced into the lambda at all and fails at
+runtime with `MODULE_NOT_FOUND`.
 
-## Smart contracts
+## The escrow program
 
 | | |
 |---|---|
-| **Language** | Rust 2021, `crate-type = ["cdylib", "rlib"]` |
-| **Target** | `wasm32v1-none` |
-| **Release profile** | `opt-level = "z"`, `lto`, `panic = "abort"`, symbols stripped, **`overflow-checks = true`** — the one thing not traded away for size |
-| **Tests** | 34 — 19 for the escrow with snapshots, 15 for the token — via `soroban-sdk`'s `testutils` |
+| **Language** | Rust 2021, Anchor 0.32, `crate-type = ["cdylib", "lib"]` |
+| **Release profile** | `lto = "fat"`, `codegen-units = 1`, **`overflow-checks = true`** |
+| **Build** | `npm run program:build` → `cargo build-sbf --tools-version v1.52`; IDL with `anchor idl build` |
+| **Tests** | no Rust test suite. Verified on devnet: `scripts/solana-init.mts` smokes open → settle and open → refund after every deploy, and `scripts/devnet-e2e.mts` drives both paths through the app's routes |
 
 ## Infrastructure
 
 | | |
 |---|---|
 | **Vercel** | the Next apps. Node runtime, `maxDuration = 300` on `/api/chat` — a basket is a dozen HTTPS round trips to a storefront |
-| **Postgres** | orders, deposits, cards and archived chats, over `DATABASE_URL` |
-| **Upstash Redis** | conversation history, 1h TTL. Provisioned through the Vercel Marketplace, which injects legacy KV-compatible names (`KV_REST_API_URL`, `KV_REST_API_TOKEN`) — so `Redis.fromEnv()` does *not* work and credentials are passed explicitly |
+| **Railway** | `services/sandbox`, from its `Dockerfile` and `railway.json` (healthcheck `/health`, 1 replica) |
+| **Privy** | login, embedded wallets, devnet gas sponsorship |
+| **Solana devnet RPC** | `https://api.devnet.solana.com` by default; `SOLANA_RPC_URL` / `NEXT_PUBLIC_SOLANA_RPC_URL` to use another |
+| **Solscan** | explorer links, `?cluster=devnet` |
+| **Upstash Redis** | provisioned through the Vercel Marketplace, which injects legacy KV-compatible names (`KV_REST_API_URL`, `KV_REST_API_TOKEN`) — so `Redis.fromEnv()` does *not* work and credentials are passed explicitly |
 | **Cloudflare Turnstile** | the human gate in `middleware.ts`. Unset in production it fails **shut**: every `/api/*` route but `/api/human` answers 403 |
-| **Stellar** | Horizon on both networks; Soroban RPC and friendbot on testnet |
-| **stellar.expert** | explorer links |
+| **Postgres** | optional, the chat archive, over `DATABASE_URL` |
 
 `@vercel/kv` is deliberately **not** used: it is deprecated, and Vercel moved
 existing KV stores to Upstash in December 2024.
@@ -152,26 +185,26 @@ existing KV stores to Upstash in December 2024.
 ## Tests
 
 ```
-npm test                          # 1178 — mcp 520 · trust 2 · web 583 · landing 73
-npm test -w @changuito/mcp        #  520 — adapters, money, FX, cart maths
-npm test -w @changuito/web        #  583 — chat-state, order-check, deposit, copy, …
-npm run contracts:test            #   34 — escrow 19 · mock_usdc 15
+npm test                          # mcp · trust · web · landing
+npm test -w @changuito/mcp        # adapters, money, FX, cart maths
+npm test -w @changuito/web        # chat-state, checkout copy, faucet policy, sessions, …
 npm run typecheck -w @changuito/web
 npm run build
+node --experimental-strip-types scripts/devnet-e2e.mts   # against `npm run dev`; see judges.md
 ```
 
-`npm run test:e2e` runs Playwright. Two specs set
-`test.use({ trace: 'off', video: 'off', screenshot: 'off' })` and must keep it:
-the repo is public and one of them walks past a card number.
+None of the unit suites needs an API key. `devnet-e2e` needs a dev server with
+`SOLANA_RESOLVER_SECRET` set, and spends devnet SOL from the resolver.
 
-The web suite runs on `node:test` with `--experimental-strip-types`, which
-erases types rather than compiling them. Two sharp edges follow:
+`npm run test:e2e` runs Playwright. The web suite runs on `node:test` with
+`--experimental-strip-types`, which erases types rather than compiling them.
+Two sharp edges follow:
 
 - **It cannot resolve extensionless imports.** A test that imports a module
   which imports `'../mcp/bridge'` fails at load. This is why `turn-store.ts`
   depends on the agent loop with `import type` only — type imports are erased
-  and cost nothing at runtime — and why `deposit-watch.ts` spells its own
-  relative import as `'./units.ts'`. A *package* import resolves fine.
+  and cost nothing at runtime — and why `lib/solana.ts` has no relative
+  imports at all. A *package* import resolves fine.
 - **It rejects syntax that emits code.** A parameter property, an `enum` or a
   namespace fails the whole file with `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`.
 
@@ -181,26 +214,51 @@ Nothing here is required to read the code, and the app degrades rather than
 breaking when a value is missing — each row says into what. Annotated at length
 in `apps/web/.env.example`; setup in [`../DEPLOY.md`](../DEPLOY.md).
 
+### Web (`apps/web`, Vercel)
+
 | | Required | For, and what happens without it |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | yes | the agent |
-| `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` | no | the wallet. Without it preview still works end to end; what is missing is the way *out* of preview |
-| `DATABASE_URL`, `DIRECT_URL` | for orders | orders, cards and the chat archive. Unset, the checkout has nowhere to record |
-| `DEPOSIT_ADDRESS_TESTNET` / `_MAINNET` | for checkout | where a deposit is paid. A `C…` contract address is refused — it cannot take a memo. Unset, the deposit screen answers 503 |
-| `DEMO_WALLET_SECRET` | for preview pay | lets preview settle a real testnet payment for a visitor with no wallet. Unset, the button answers 503 and says so |
-| `VYRION_API_KEY` | for the card | unset, the card button is never rendered rather than rendered and broken |
-| `ALLOW_LIVE` | no | an `sk_live_` key is refused unless this is exactly `1` |
-| `STELLAR_RESOLVER_SECRET` | for faucet + settle | the testnet signing key. Read at call time, never at import, so a build without it succeeds |
-| `STELLAR_RESOLVER_SECRET_MAINNET` | no | must be a *different* key; checked against `deployments.json` and refused on mismatch |
-| `REAL_MODE_ALLOWLIST_ADDRESSES` | for modo real | deny-by-default: empty in production means nobody, Vercel previews included |
-| `REAL_MODE_OPEN_TO_ALL` | no | drops the allowlist, **not** the SEP-53 signature |
-| `FAUCET_ALLOWLIST_ADDRESSES`, `FAUCET_OPEN_TO_ALL` | no | same rules, for the testnet faucet |
+| `ANTHROPIC_API_KEY` | yes (or `OPENAI_API_KEY`) | the agent. With neither, `/api/chat` answers with a configuration error |
+| `NEXT_PUBLIC_PRIVY_APP_ID` | for login and checkout | the Privy app. Unset, the wallet widget renders disabled and nobody can sign in or pay; chat still works for guests |
+| `PRIVY_APP_SECRET` | for login | server-side lookup of the user's linked Solana wallet (`lib/privy-server.ts` returns no identity without it, so `/api/session/login` answers 401). The token itself is verified against Privy's public JWKS |
+| `CHG_SESSION_SECRET` | in production | signs the httpOnly `chg_user` cookie. Unset in production, login answers 503. Locally a dev constant stands in |
+| `SOLANA_RESOLVER_SECRET` | for faucet, settle, refund | the resolver keypair, as the 64-byte JSON array or base58. Checked against `DEPLOYMENTS.devnet.resolver` and refused on mismatch. Read at call time, so a build without it succeeds; the faucet answers 503 |
+| `SOLANA_RPC_URL`, `NEXT_PUBLIC_SOLANA_RPC_URL` | no | server and browser RPC. Default `https://api.devnet.solana.com`, which rate-limits; a dedicated devnet RPC is worth it on a public URL |
+| `SANDBOX_URL` | for real shopping in production | the Railway sandbox. Unset outside production, an in-process mock answers; unset in production, checkout cannot start (and refunds) unless `SANDBOX_MOCK=1` |
+| `SANDBOX_TOKEN` | with `SANDBOX_URL` | Bearer token; must equal the sandbox's own `SANDBOX_TOKEN` |
+| `SANDBOX_MOCK` | no | `1` lets a production build use the mock — a demo without the browser farm |
+| `SANDBOX_MOCK_FAIL` | no | `1` makes the mock fail at checkout: the refund path |
+| `ARS_PER_USD` | no | pin the rate so a demo quotes the same number every time. Unset means the live feed |
+| `KV_REST_API_URL`, `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` / `_TOKEN`) | in production | conversation history, quotas and checkout records across instances; falls back to an in-process Map. Production quotas fail closed without it |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | in production | the human gate. The secret alone decides it, and unset in production it fails shut |
-| `CHG_SESSION_SECRET` | in production | signs the httpOnly login cookie. Unset, nobody can sign in |
-| `KV_REST_API_URL`, `KV_REST_API_TOKEN` | no | conversation history across restarts; falls back to an in-process Map |
-| `FX_ARS_PER_USD` | no | pin the rate so a demo quotes the same number every time |
-| `AGENT_MODEL`, `AGENT_EFFORT`, `AGENT_USAGE` | no | model override; the speed knob; per-hop token logging including cache reads and writes |
+| `DATABASE_URL` | no | the chat archive for signed-in wallets. Unset, nothing is archived; orders do not need it |
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | no | if the key is set, the agent runs on OpenAI instead of Anthropic |
+| `AGENT_MODEL`, `AGENT_EFFORT`, `AGENT_USAGE` | no | Anthropic model override; the speed knob; per-hop token logging including cache reads and writes |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID`, `NEXT_PUBLIC_META_PIXEL_ID`, `NEXT_PUBLIC_CLARITY_PROJECT_ID` | no | analytics. Unset, nothing loads |
 
-There is **no mode variable, and there must not be one.** The mode is whether
-Pollar has a session — see [architecture.md](architecture.md#two-products-in-one-bundle).
+### Sandbox (`services/sandbox`, Railway)
+
+| | Required | For |
+|---|---|---|
+| `SANDBOX_TOKEN` | yes | Bearer auth on `/jobs`. Unset, `/jobs` answers 503 |
+| `TYPESAFE_API_KEY` | yes | Jev |
+| `DIA_ARG_EMAIL`, `DIA_ARG_PWD`, `DIA_ARG_DNI` | yes | the operator's Día account. Typed by the harness from the environment and redacted from everything Jev sees |
+| `DIA_ARG_POSTCODE` | yes | the delivery postcode checkout asks for |
+| `PORT` | no | set by Railway; the image defaults to 8080 |
+
+There is **no network or mode variable, and there must not be one.** Devnet is
+the only cluster, and it is a constant in the generated `lib/deployments.ts`.
+
+## Privy dashboard
+
+The app expects this configuration (dashboard.privy.io → your app):
+
+1. **Login methods:** email only. The provider also sets
+   `loginMethods: ['email']`, so other methods enabled in the dashboard are not
+   offered.
+2. **Embedded wallets → Solana:** on, created on login for all users. Ethereum
+   embedded wallets off.
+3. **Gas sponsorship:** enabled for **Solana devnet**. Without it,
+   `signAndSendTransaction({ sponsor: true })` fails and the lock step errors.
+4. **Allowed origins:** `http://localhost:3124` and the production domain.
+5. **App ID** → `NEXT_PUBLIC_PRIVY_APP_ID`; **App secret** → `PRIVY_APP_SECRET`.

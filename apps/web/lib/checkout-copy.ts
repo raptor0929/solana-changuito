@@ -297,7 +297,8 @@ export const CHECKOUT_MODES = [PRUEBA, REAL] as const;
  */
 export function checkoutCopy(net: NetworkId, lang: Lang = DEFAULT_LANG): CheckoutCopy {
   if (lang === 'en') return MODES_EN[net];
-  return net === 'mainnet' ? REAL : PRUEBA;
+  void net;
+  return PRUEBA;
 }
 
 /* ------------------------------------------------------------------------- *
@@ -441,4 +442,4 @@ const LIVE_EN: CheckoutCopy = {
   failed: "We couldn't complete the purchase. Write to us and we'll refund the amount by hand.",
 };
 
-const MODES_EN: Record<NetworkId, CheckoutCopy> = { testnet: PRACTICE_EN, mainnet: LIVE_EN };
+const MODES_EN: Record<NetworkId, CheckoutCopy> = { devnet: PRACTICE_EN };

@@ -2,7 +2,7 @@
   "name": "changuito",
   "private": true,
   "version": "0.1.0",
-  "description": "An agent that shops Argentine supermarkets over MCP and settles in USDC on Stellar.",
+  "description": "An agent that shops Argentine supermarkets over MCP and pays from a USDC escrow on Solana devnet.",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -23,10 +23,9 @@
     "db:status": "node scripts/db.mjs status",
     "db:invariants": "node scripts/db-invariants.mjs",
     "db:archive": "node --experimental-strip-types scripts/db-chat-archive.mts",
-    "contracts:build": "stellar contract build --manifest-path contracts/Cargo.toml",
-    "contracts:test": "cargo test --manifest-path contracts/Cargo.toml",
-    "deploy:testnet": "./scripts/deploy.sh testnet",
-    "deploy:mainnet": "./scripts/deploy.sh mainnet"
+    "program:build": "cd anchor/programs/changuito_escrow && cargo build-sbf --tools-version v1.52",
+    "deploy:devnet": "./scripts/solana-deploy.sh",
+    "devnet:init": "node --experimental-strip-types scripts/solana-init.mts --no-smoke"
   },
   "devDependencies": {
     "@playwright/test": "1.55.1"

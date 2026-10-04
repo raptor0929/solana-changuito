@@ -13,7 +13,7 @@ import { DEFAULT_LANG, INTL_LOCALE, type Lang } from './lang.ts';
  * promise a grant the server will not make.
  */
 
-const SCALE = 10_000_000n;
+const SCALE = 1_000_000n;
 
 /**
  * Token units as money: 500_000_000n -> "50,00", or "50.00" for an English
