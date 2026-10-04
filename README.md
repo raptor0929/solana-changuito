@@ -16,6 +16,7 @@ fails, the escrow refunds you, and nobody has to approve that by hand.
 | | |
 |---|---|
 | **Hackathon** | Crypto World's Fair (Solana Foundation × Colosseum) — [github.com/raptor0929/solana-changuito](https://github.com/raptor0929/solana-changuito) |
+| **Live app** | **[solana-changuito.vercel.app](https://solana-changuito.vercel.app)**, the official Solana deployment for now ([app.changuito.me](https://app.changuito.me) is the earlier Stellar build) |
 | **Network** | **Solana devnet only**: our own mock USDC mint, faucet in the app |
 | **Reviewing this?** | **[docs/judges.md](docs/judges.md)**: a 15-minute path through the repo, with claims mapped to evidence |
 | **Videos** | Pitch: _link pending_ · Demo: _link pending_ (sources in [`creatives/`](creatives/)) |
