@@ -16,7 +16,7 @@ Devnet only. There is no mainnet configuration and no network switch.
 
 | | Where | Becomes |
 |---|---|---|
-| **Anthropic** | [console.anthropic.com](https://console.anthropic.com) → API keys | `ANTHROPIC_API_KEY` |
+| **OpenAI or Anthropic** (one) | [platform.openai.com](https://platform.openai.com/api-keys) or [console.anthropic.com](https://console.anthropic.com) → API keys | `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (Part 4) |
 | **Privy** | [dashboard.privy.io](https://dashboard.privy.io) → your app → Settings | `NEXT_PUBLIC_PRIVY_APP_ID`, `PRIVY_APP_SECRET` |
 | **Resolver keypair** | `~/.config/solana/changuito/resolver.json` on the machine that deployed the program | `SOLANA_RESOLVER_SECRET` |
 | **Cloudflare Turnstile** | Cloudflare → Turnstile → add a site | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` |
@@ -68,7 +68,7 @@ Every variable, with what happens when it is missing, is in
 
 | Variable | Value |
 |---|---|
-| `ANTHROPIC_API_KEY` | from 1.1 |
+| `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` | from 1.1; set one. With the OpenAI key set, it answers every hop |
 | `NEXT_PUBLIC_PRIVY_APP_ID` | from 1.2 |
 | `PRIVY_APP_SECRET` | from 1.2 |
 | `CHG_SESSION_SECRET` | `openssl rand -hex 32`. Signs the `chg_user` cookie; unset in production, login answers 503. Rotating it signs everyone out |
@@ -85,7 +85,7 @@ Three of these fail in ways worth knowing before they happen:
 - **`TURNSTILE_SECRET_KEY` fails shut.** Unset in production, `middleware.ts`
   answers 403 `solo_humanos` on every `/api/*` route except `/api/human`, so
   chat, login, faucet and checkout are all dead. Deliberate: an open agent
-  endpoint on a public URL bills somebody's Anthropic key. The site key does
+  endpoint on a public URL bills somebody's model key. The site key does
   not affect the gate, but without it the widget never mounts and nobody gets
   through.
 - **`SOLANA_RESOLVER_SECRET` is read at call time**, so a build without it

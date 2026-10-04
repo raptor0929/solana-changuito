@@ -15,7 +15,7 @@ fails, the escrow refunds you, and nobody has to approve that by hand.
 
 | | |
 |---|---|
-| **Hackathon** | Crypto World's Fair (Solana Foundation × Colosseum) — branch `feat/solana-devnet` |
+| **Hackathon** | Crypto World's Fair (Solana Foundation × Colosseum) — [github.com/raptor0929/solana-changuito](https://github.com/raptor0929/solana-changuito) |
 | **Network** | **Solana devnet only**: our own mock USDC mint, faucet in the app |
 | **Reviewing this?** | **[docs/judges.md](docs/judges.md)**: a 15-minute path through the repo, with claims mapped to evidence |
 | **Videos** | Pitch: _link pending_ · Demo: _link pending_ (sources in [`creatives/`](creatives/)) |
@@ -297,8 +297,7 @@ Requires **Node ≥ 22.12** (`.nvmrc`). The program is already deployed to devne
 so you only need Rust and Anchor to change it.
 
 ```bash
-git clone https://github.com/Simonethg/changuito && cd changuito
-git checkout feat/solana-devnet
+git clone https://github.com/raptor0929/solana-changuito && cd solana-changuito
 npm install
 cp apps/web/.env.example apps/web/.env.local
 npm run dev            # http://localhost:3124

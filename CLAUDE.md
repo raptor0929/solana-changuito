@@ -337,7 +337,7 @@ the message, which is what used to happen to every message.
 
 ### 8. Checkout is an escrow and a sandbox, not an iframe
 
-*The Solana port (`feat/solana-devnet`). Not the agent, but the agent's cart
+*The Solana port. Not the agent, but the agent's cart
 is what it pays for, so the rules live here too.*
 
 The store's checkout used to open in an iframe and the shopper typed a card

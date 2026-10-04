@@ -15,7 +15,7 @@ read one section. It states what is simulated, by us, before you find it.
 |---|---|
 | **Live app** | [app.changuito.me](https://app.changuito.me). Everything below is verifiable from a local clone, which is the build this document describes |
 | **Marketing site** | [www.changuito.me](https://www.changuito.me) |
-| **Repository** | [github.com/Simonethg/changuito](https://github.com/Simonethg/changuito), branch `feat/solana-devnet` — MIT |
+| **Repository** | [github.com/raptor0929/solana-changuito](https://github.com/raptor0929/solana-changuito), branch `main` — MIT |
 | **Built by** | [SimonethG](https://www.linkedin.com/in/simonethg/) and [Fabio](https://www.linkedin.com/in/fabio-laura-yavi/), in Argentina |
 | **Cluster** | Solana **devnet** only. There is no mainnet configuration in the code |
 | **What is on-chain** | an Anchor escrow: the shopper locks USDC, the backend resolver settles it to a treasury or refunds it. Every order is an account you can read |
@@ -195,7 +195,7 @@ Because comments sit next to the code that would otherwise be undone.
 - [`packages/mcp`](../packages/mcp) (supermercado-mcp: VTEX search and cart tools
   for Día, Carrefour, Disco and Jumbo) predates the hackathon and was vendored in.
 - The app was first built on another chain with a different wallet and payment
-  rail. The branch `feat/solana-devnet` ports it to Solana: the Anchor program,
+  rail. This repository ports it to Solana: the Anchor program,
   the Privy login, the checkout routes, the faucet and the sandbox integration
   are new in it. The chat agent and the MCP layer carried over.
 - The sandbox harness in [`services/sandbox`](../services/sandbox) is copied from
