@@ -1,6 +1,8 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Cart, Product } from '@changuito/mcp/types';
-import { Redis } from '@upstash/redis';
+
+import { hasDatabase } from '../db.ts';
+import { kvGet, kvSet } from '../kv.ts';
 
 // Type-only, deliberately: a store that imported the agent loop would drag the
 // Anthropic client and the whole MCP bridge in behind it, for a file that only
@@ -20,12 +22,13 @@ import type { Turn } from './loop';
  * History cannot ride along in the snapshot the way a postal code can. The
  * snapshot is public — a cart id is already handed over as a URL — whereas the
  * transcript is the conversation itself, and it grows every hop. So it goes to
- * Redis instead, keyed by session.
+ * the database instead, keyed by session: the `kv` table (lib/kv.ts), where
+ * Redis used to be.
  *
- * With no Redis configured — a fresh clone, `npm run dev`, nobody's account —
- * this falls back to the in-process Map it replaces. One developer on one
- * machine has exactly one instance, so the Map is not a compromise there; it is
- * the same guarantee for free.
+ * With no DATABASE_URL — a fresh clone, `npm run dev`, nobody's account — this
+ * falls back to the in-process Map it replaces. One developer on one machine
+ * has exactly one instance, so the Map is not a compromise there; it is the
+ * same guarantee for free.
  */
 
 /**
@@ -104,37 +107,19 @@ export interface TurnStore {
   get(sessionId: string): Promise<Turn | undefined>;
   set(sessionId: string, turn: Turn): Promise<void>;
   /** For the banner in the server log, so it is obvious which one is running. */
-  readonly kind: 'redis' | 'memory';
+  readonly kind: 'postgres' | 'memory';
 }
 
-/**
- * The Upstash integration on Vercel injects KV-compatible names
- * (`KV_REST_API_URL`), while a database created straight from Upstash uses its
- * own (`UPSTASH_REDIS_REST_URL`). Both are the same REST endpoint, so both are
- * accepted and neither is worth making the reader care about.
- *
- * The REST pair is the one to use, not `REDIS_URL` or `KV_URL`: those are
- * `rediss://` strings for a TCP client, and a TCP connection per lambda is the
- * connection-limit problem that picking an HTTP client avoids.
- */
-function credentials(): { url: string; token: string } | undefined {
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-  return url && token ? { url, token } : undefined;
-}
-
-function redisStore(url: string, token: string): TurnStore {
-  const redis = new Redis({ url, token });
-
+function postgresStore(): TurnStore {
   return {
-    kind: 'redis',
+    kind: 'postgres',
 
-    // A Redis that is down should cost the user their history, not their turn.
-    // Both paths swallow and degrade: `get` starts a fresh conversation, `set`
-    // leaves the old value to expire. Either is survivable; a 500 is not.
+    // A database that is down should cost the user their history, not their
+    // turn. Both paths swallow and degrade: `get` starts a fresh conversation,
+    // `set` leaves the old value to expire. Either is survivable; a 500 is not.
     async get(sessionId) {
       try {
-        return decodeTurn(await redis.get(KEY(sessionId)));
+        return decodeTurn(await kvGet(KEY(sessionId)));
       } catch (e) {
         console.error('[turn-store] read failed, starting fresh:', e);
         return undefined;
@@ -143,7 +128,7 @@ function redisStore(url: string, token: string): TurnStore {
 
     async set(sessionId, turn) {
       try {
-        await redis.set(KEY(sessionId), encodeTurn(turn), { ex: TTL_SECONDS });
+        await kvSet(KEY(sessionId), encodeTurn(turn), TTL_SECONDS);
       } catch (e) {
         console.error('[turn-store] write failed, history not saved:', e);
       }
@@ -188,12 +173,11 @@ let store: TurnStore | undefined;
 
 export function turnStore(): TurnStore {
   if (!store) {
-    const creds = credentials();
-    store = creds ? redisStore(creds.url, creds.token) : memoryStore();
+    store = hasDatabase() ? postgresStore() : memoryStore();
     console.log(
-      store.kind === 'redis'
-        ? '[turn-store] Redis — history survives cold starts.'
-        : '[turn-store] in-memory — history is lost when this process restarts. Set KV_REST_API_URL and KV_REST_API_TOKEN to persist it.',
+      store.kind === 'postgres'
+        ? '[turn-store] Postgres — history survives cold starts.'
+        : '[turn-store] in-memory — history is lost when this process restarts. Set DATABASE_URL to persist it.',
     );
   }
   return store;

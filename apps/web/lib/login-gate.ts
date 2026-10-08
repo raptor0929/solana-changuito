@@ -9,9 +9,9 @@
  * hourly cap applies instead.
  *
  * The counters fail closed. They are the only thing between a stranger and
- * the Anthropic bill and the supermarkets' APIs, so a Redis error answers 503
- * rather than waving the request through, and production without Redis
- * credentials refuses too. Outside production an in-memory map stands in,
+ * the Anthropic bill and the supermarkets' APIs, so a database error answers
+ * 503 rather than waving the request through, and production without a
+ * DATABASE_URL refuses too. Outside production an in-memory map stands in,
  * the same compromise as turn-store on one developer's machine.
  *
  * ## Failing closed has to mean failing *fast*
@@ -22,25 +22,21 @@
  * responder" (CLAUDE.md §6). So every millisecond spent here is spent with
  * the shopper looking at a spinner and nothing behind it.
  *
- * Two things were wrong with that. `@upstash/redis` is constructed with no
- * signal by default, so each REST call had *no timeout at all*, and it retries
- * five times before giving up; one hung connection sat there until Vercel cut
- * the request, and the browser's fetch rejected before it ever saw a response
- * header. And the guest path made up to seven of those calls one after
- * another. A slow round trip was therefore multiplied by seven and then
- * allowed to run forever.
- *
- * So: a bounded signal on the client, and the independent reads and writes
- * batched. Seven serial round trips become two, and the worst case is a few
- * seconds and a 503 the shopper can read, rather than a minute of nothing.
- * The verdict is unchanged — this is about how long it takes to reach it.
+ * The counters lived in Redis once, and the client there had no timeout at
+ * all and retried five times, so one hung connection sat until Vercel cut the
+ * request; and the guest path made seven of those calls in a row. Two fixes
+ * came out of that and both are kept here: every round trip is raced against
+ * a deadline, and the independent reads and writes are batched into two. The
+ * worst case is a few seconds and a 503 the shopper can read, rather than a
+ * minute of nothing. The verdict is unchanged — this is about how long it
+ * takes to reach it.
  */
 
 import { createHash } from 'node:crypto';
 
-import { Redis } from '@upstash/redis';
-
+import { hasDatabase } from './db.ts';
 import { HUMAN_COOKIE, readCookie } from './human-gate.ts';
+import { quotaGet, quotaIncr } from './kv.ts';
 import {
   FREE_TURNS,
   FREE_TURNS_PER_IP,
@@ -218,42 +214,41 @@ export interface TurnCounter {
    * count alive forever.
    */
   incr(key: string, ttlSeconds?: number): Promise<number>;
-  readonly kind: 'redis' | 'memory' | 'unavailable';
-}
-
-function credentials(env: NodeJS.ProcessEnv): { url: string; token: string } | undefined {
-  const url = env.KV_REST_API_URL || env.UPSTASH_REDIS_REST_URL;
-  const token = env.KV_REST_API_TOKEN || env.UPSTASH_REDIS_REST_TOKEN;
-  return url && token ? { url, token } : undefined;
+  /**
+   * `redis` is no longer built. It stays in the union because
+   * lib/test/login-gate.test.ts pins the fail-closed path with a fake of that
+   * kind, and the tests are the fixed point (CLAUDE.md).
+   */
+  readonly kind: 'postgres' | 'redis' | 'memory' | 'unavailable';
 }
 
 /**
  * How long one counter round trip may take.
  *
- * Generous for Upstash, which answers in tens of milliseconds from the same
- * region, and short enough that the two batched phases below cannot come
- * close to the time a gateway is willing to wait for a first byte. A signal
- * *function* rather than a signal: the client re-evaluates it per attempt, so
- * a shared one would already be spent by the time a retry used it.
+ * Generous for a pooled Postgres in the same region, which answers in tens of
+ * milliseconds, and short enough that the two batched phases below cannot
+ * come close to the time a gateway is willing to wait for a first byte.
  */
 const COUNTER_TIMEOUT_MS = 2_500;
 
-function redisCounter(url: string, token: string): TurnCounter {
-  const redis = new Redis({
-    url,
-    token,
-    signal: () => AbortSignal.timeout(COUNTER_TIMEOUT_MS),
-    // Down from the default five. A retry is worth one attempt at a dropped
-    // connection and no more: past that the store is not slow, it is down,
-    // and the honest answer is the 503 rather than another wait.
-    retry: { retries: 1, backoff: () => 250 },
+/**
+ * The statement keeps running on the server when the race is lost; what is
+ * cut short is the wait, which is the only part the shopper can see.
+ */
+function deadline<T>(p: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`counter took longer than ${COUNTER_TIMEOUT_MS}ms`)), COUNTER_TIMEOUT_MS);
   });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
+function postgresCounter(): TurnCounter {
   return {
-    kind: 'redis',
+    kind: 'postgres',
     async get(key) {
       try {
-        const n = await redis.get<number>(key);
-        return typeof n === 'number' && Number.isFinite(n) ? n : 0;
+        return await deadline(quotaGet(key));
       } catch (e) {
         console.error('[login-gate] counter read failed:', e);
         throw new CounterUnavailable('counter read failed');
@@ -261,9 +256,7 @@ function redisCounter(url: string, token: string): TurnCounter {
     },
     async incr(key, ttlSeconds = TTL_SECONDS) {
       try {
-        const n = await redis.incr(key);
-        if (n === 1) await redis.expire(key, ttlSeconds);
-        return typeof n === 'number' ? n : 1;
+        return await deadline(quotaIncr(key, ttlSeconds));
       } catch (e) {
         console.error('[login-gate] counter incr failed:', e);
         throw new CounterUnavailable('counter incr failed');
@@ -272,7 +265,7 @@ function redisCounter(url: string, token: string): TurnCounter {
   };
 }
 
-/** Production with no Redis: nothing shared to count with, so nothing is allowed. */
+/** Production with no database: nothing shared to count with, so nothing is allowed. */
 function unavailableCounter(): TurnCounter {
   const refuse = async (): Promise<number> => {
     throw new CounterUnavailable('no shared counter store');
@@ -322,10 +315,9 @@ export function __resetTurnCounterForTests(next?: TurnCounter): void {
 
 export function guestTurnCounter(env: NodeJS.ProcessEnv = process.env): TurnCounter {
   if (!counter) {
-    const creds = credentials(env);
-    if (creds) counter = redisCounter(creds.url, creds.token);
+    if (hasDatabase(env)) counter = postgresCounter();
     else if (env.NODE_ENV === 'production') {
-      console.error('[login-gate] no Redis credentials in production — chat and faucet quotas refuse every request.');
+      console.error('[login-gate] no DATABASE_URL in production — chat and faucet quotas refuse every request.');
       counter = unavailableCounter();
     } else counter = memoryCounter();
     if (counter.kind === 'memory') console.log('[login-gate] in-memory counters (lost on restart).');

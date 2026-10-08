@@ -143,7 +143,7 @@ export async function POST(req: Request): Promise<Response> {
           await turns.set(body.sessionId, turn);
 
           // The durable copy, for a signed-in shopper only. Inside the same
-          // callback as the Redis write so `withSession`'s per-session queue
+          // callback as the turn-store write so `withSession`'s per-session queue
           // covers both, and awaited so a lambda frozen at the response does
           // not drop it — it cannot throw, and it is one round-trip per turn
           // rather than one per hop.

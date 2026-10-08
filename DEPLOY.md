@@ -20,7 +20,7 @@ Devnet only. There is no mainnet configuration and no network switch.
 | **Privy** | [dashboard.privy.io](https://dashboard.privy.io) → your app → Settings | `NEXT_PUBLIC_PRIVY_APP_ID`, `PRIVY_APP_SECRET` |
 | **Resolver keypair** | `~/.config/solana/changuito/resolver.json` on the machine that deployed the program | `SOLANA_RESOLVER_SECRET` |
 | **Cloudflare Turnstile** | Cloudflare → Turnstile → add a site | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` |
-| **Upstash Redis** | Vercel → Storage → Marketplace (1.5) | `KV_REST_API_URL`, `KV_REST_API_TOKEN` |
+| **Supabase** | [supabase.com](https://supabase.com) → New project (1.5) | `DATABASE_URL` |
 
 ### 1.2 Configure Privy
 
@@ -75,12 +75,17 @@ Every variable, with what happens when it is missing, is in
 | `SOLANA_RESOLVER_SECRET` | the contents of `resolver.json` (the 64-number JSON array), or its base58 form. Checked against the resolver address in `lib/deployments.ts` and refused if it does not match |
 | `SOLANA_RPC_URL`, `NEXT_PUBLIC_SOLANA_RPC_URL` | optional; a dedicated devnet RPC. The public `api.devnet.solana.com` rate-limits under traffic |
 | `SANDBOX_URL`, `SANDBOX_TOKEN` | from Part 2. Until then, set `SANDBOX_MOCK=1` or checkout cannot start in production |
-| `KV_REST_API_URL`, `KV_REST_API_TOKEN` | injected by 1.5 |
+| `DATABASE_URL` | from 1.5; the transaction pooler string |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | from 1.1 |
 | `ARS_PER_USD` | optional; pins the rate for a demo |
-| `DATABASE_URL` | optional; 1.6 |
 
-Three of these fail in ways worth knowing before they happen:
+Four of these fail in ways worth knowing before they happen:
+
+- **`DATABASE_URL` fails shut on the quotas.** Unset in production, the chat
+  and faucet quotas have nothing shared to count with and answer 503 on every
+  request rather than running unlimited turns on your key. Checkout polling
+  needs it too: the record written at quote is read at start and at every
+  status poll, possibly by a different lambda. See 1.5.
 
 - **`TURNSTILE_SECRET_KEY` fails shut.** Unset in production, `middleware.ts`
   answers 403 `solo_humanos` on every `/api/*` route except `/api/human`, so
@@ -99,29 +104,28 @@ Three of these fail in ways worth knowing before they happen:
 Only the `NEXT_PUBLIC_` names reach the browser. Do not add the prefix to any
 other.
 
-### 1.5 Redis: conversation history, quotas, checkout records
+### 1.5 The database: history, quotas, checkout records, archive
 
-1. **Storage → Create Database → Marketplace → Upstash for Redis.**
-2. Region: match your functions (Vercel's default is `iad1`). Leave Read
-   Regions empty.
-3. **Turn Eviction on.** Off means writes *fail* once the database is full.
-   Conversations are a cache with a one hour TTL; checkout records live 24 hours.
-4. **Connect Project.** That injects `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
+One Postgres on Supabase holds everything the app remembers between requests:
 
-Required in production because the quotas fail closed: without it (or with
-Redis down) `/api/chat` answers 503 rather than running unlimited turns on your
-key. It also matters for checkout — the record written at quote is read at
-start and at every status poll, possibly by a different lambda, and the
-in-process fallback does not survive that.
+| Table | Holds | Lifetime |
+|---|---|---|
+| `kv` | the agent's working conversation per session; the checkout record from quote to settle | 1 hour; 24 hours |
+| `quota` | chat and faucet counters per guest, IP, human pass and wallet | the counter's window |
+| `chat` | the archive of conversations for signed-in wallets | permanent |
 
-Use the REST pair, not `REDIS_URL` or `KV_URL`: those are `rediss://` strings
-for a TCP client. Locally, leave them out and an in-process Map stands in.
+The first two used to be Upstash Redis. `expires_at` is a column, every read
+checks it against `now()`, and writes sweep dead rows now and then — see
+`apps/web/lib/kv.ts` and `supabase/migrations/0006_kv.sql`.
 
-### 1.6 The database (optional)
+Required in production: the quotas fail closed (1.4), and checkout polling
+reads the record from whichever lambda answers. Locally, leave `DATABASE_URL`
+out and an in-process Map stands in for `kv` and `quota`; nothing is archived.
 
-Postgres holds one thing now: the archive of conversations for signed-in
-wallets. Orders are on chain. A deployment with no `DATABASE_URL` boots and
-works; it just does not archive.
+**Free-plan pausing.** Supabase pauses a free project after about a week
+without database activity, and when it is paused every chat answers 503 until
+you press *Resume* in the dashboard. Open the dashboard before a demo, or put
+the project on a paid plan.
 
 1. **supabase.com → New project.** Region: match your Vercel functions.
 2. **Project Settings → Database → Connection string.** Take both: the
@@ -137,6 +141,9 @@ npm run db:invariants  # the constraints, against the real database
 ```
 
 5. In Vercel, set **`DATABASE_URL` only**. Migrations are a laptop operation.
+   `KV_REST_API_URL` and `KV_REST_API_TOKEN` are read by nothing in `apps/web`
+   any more; delete them, and the Upstash database with them unless the
+   landing's waitlist uses it (Part 5).
 
 6543 is transaction-mode pooling, the right shape for a lambda per request;
 5432 is a session, which DDL needs and a request handler must never hold.
@@ -144,7 +151,7 @@ npm run db:invariants  # the constraints, against the real database
 `prepare: false` is already passed: the pooler rejects named prepared
 statements.
 
-### 1.7 Check a deployment
+### 1.6 Check a deployment
 
 The chat **streams** rather than arriving in one lump. If it arrives all at
 once, something is buffering the SSE response — the route sets

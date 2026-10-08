@@ -169,11 +169,12 @@ flowchart TB
     subgraph X["OUTSIDE"]
         VTEX["Día (VTEX): catalogue, cart"]
         SOL["Solana devnet<br/>escrow program · mock USDC"]
-        RD[("Upstash Redis<br/>turns, quotes")]
+        PG[("Supabase Postgres<br/>turns, quotes, quotas · chat archive")]
     end
 
     CH --> CHAT --> MCP --> VTEX
-    CHAT --> RD
+    CHAT --> PG
+    Q --> PG
     CH --> CM
     CM --> PV
     CM --> Q
@@ -309,7 +310,7 @@ npm run dev            # http://localhost:3124
 | `SANDBOX_URL` / `SANDBOX_TOKEN` | the real sandbox. Unset → mock job |
 | `ARS_PER_USD` | optional; pins the rate for a reproducible quote |
 | `SOLANA_RPC_URL` | optional; defaults to public devnet |
-| `KV_REST_API_URL` / `_TOKEN` | optional; history and quotes survive restarts |
+| `DATABASE_URL` | Postgres (Supabase). Required in production: history, quotes and the chat/faucet quotas live there and the quotas fail closed without it. Unset locally, an in-process Map stands in |
 
 The annotated list is in [`apps/web/.env.example`](apps/web/.env.example). Deploying
 (Vercel for the app, Railway for the sandbox) is covered in **[DEPLOY.md](DEPLOY.md)**.

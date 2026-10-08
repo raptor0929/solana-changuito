@@ -32,7 +32,7 @@ import type { Block, ChatState, ToolRun } from './chat-state.ts';
  *
  * ## Why a chat stops being resumable
  *
- * CLAUDE.md §4: agent history lives in Redis with a **one hour TTL**, and
+ * CLAUDE.md §4: agent history lives in the `kv` table with a **one hour expiry**, and
  * reload is a fresh start by design because persisting the session id without
  * the transcript gives "an empty page backed by a server that remembers".
  * Restoring both halves fixes that only while the server still has its half.
@@ -45,7 +45,7 @@ import type { Block, ChatState, ToolRun } from './chat-state.ts';
 const INDEX_KEY = 'changuito:chats';
 const CHAT_PREFIX = 'changuito:chat:';
 
-/** Matches the Redis TTL in lib/agent/turn-store.ts. Past it, the server has forgotten. */
+/** Matches TTL_SECONDS in lib/agent/turn-store.ts. Past it, the server has forgotten. */
 export const RESUMABLE_MS = 60 * 60 * 1000;
 
 /** Newest first, and this many. A rail is a list, not an archive. */

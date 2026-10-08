@@ -11,7 +11,7 @@ SDK, the agent SDK — and left as ranges where it would not.
 | **React** | 19.2.0 | |
 | **TypeScript** | 5.9.3 | `strict`, `target: ES2022`. ES2023 methods like `findLastIndex` do **not** typecheck here. |
 | **Node** | ≥ 22.12 (`.nvmrc`: 22.12.0) | `--experimental-strip-types` for the test suite and the `.mts` scripts. On Vercel set the project's Node version explicitly. |
-| **`postgres`** | ^3.4.9 | the chat archive only. Orders live on chain now |
+| **`postgres`** | ^3.4.9 | the chat archive, plus the `kv` and `quota` tables that replaced Redis (`lib/kv.ts`). Orders live on chain |
 | **npm workspaces** | — | `apps/*`, `packages/*`. No Turborepo, no pnpm. |
 
 No CSS framework, no state library, no component kit. The transcript is a
@@ -33,7 +33,6 @@ is the one non-JavaScript service (Python, below).
 | **Effort** | `low` | overridable with `AGENT_EFFORT`. Thinking runs before every tool call and a basket is up to twelve of them, so this is a latency setting more than a quality one |
 | **Prompt caching** | two breakpoints | the system + tools prefix, and a moving one on the newest message. The second is what stops hop nine re-reading hops one through eight at full price |
 | **`@modelcontextprotocol/sdk`** | 1.30.0 | both the `Client` and the `McpServer`, linked with `InMemoryTransport` |
-| **`@upstash/redis`** | ^1.39.0 | conversation history. HTTP, not TCP — one connection per lambda is the connection-limit problem the REST API avoids |
 
 **One provider per deployment.** `lib/agent/loop.ts` uses Anthropic unless
 `OPENAI_API_KEY` is set, in which case `providers/openai.ts` answers instead
@@ -102,9 +101,9 @@ credited (`UPSTREAM.md`). Details in [sandbox.md](sandbox.md).
 |---|---|---|
 | **Solana devnet** | every order: buyer, amount, basket hash, status, receipt hash | the record. Read back with `getProgramAccounts` for "Mis compras" |
 | **MCP session snapshot** | retailer, postal code, cart id | the browser holds it and sends it back each turn |
-| **Upstash Redis** | the hop loop's conversation history (1h TTL); checkout records between quote and close (24h TTL) | falls back to an in-process `Map` |
+| **Postgres `kv` / `quota`** | the hop loop's conversation history (1h expiry); checkout records between quote and close (24h); chat and faucet quotas | `expires_at > now()` on every read, swept on writes. Falls back to an in-process `Map` without `DATABASE_URL` |
 | **localStorage** | the transcript the shopper sees, their chat list, receipts | the browser |
-| **Postgres** | archived chats, signed-in wallets only | optional |
+| **Postgres `chat`** | archived chats, signed-in wallets only | same database; rows do not expire |
 
 Five migrations in `supabase/migrations/`, applied with `npm run db:migrate`.
 `0001`–`0004` are from the previous build (orders, deposits, cards); nothing in
@@ -175,12 +174,12 @@ runtime with `MODULE_NOT_FOUND`.
 | **Privy** | login, embedded wallets (no gas sponsorship: the resolver pays the `open` fee) |
 | **Solana devnet RPC** | `https://api.devnet.solana.com` by default; `SOLANA_RPC_URL` / `NEXT_PUBLIC_SOLANA_RPC_URL` to use another |
 | **Solscan** | explorer links, `?cluster=devnet` |
-| **Upstash Redis** | provisioned through the Vercel Marketplace, which injects legacy KV-compatible names (`KV_REST_API_URL`, `KV_REST_API_TOKEN`) — so `Redis.fromEnv()` does *not* work and credentials are passed explicitly |
 | **Cloudflare Turnstile** | the human gate in `middleware.ts`. Unset in production it fails **shut**: every `/api/*` route but `/api/human` answers 403 |
-| **Postgres** | optional, the chat archive, over `DATABASE_URL` |
+| **Postgres (Supabase)** | over `DATABASE_URL`, the transaction pooler. Required in production: the working turn, the checkout record and the quotas (`kv`, `quota`, from `supabase/migrations/0006_kv.sql`) as well as the chat archive |
 
-`@vercel/kv` is deliberately **not** used: it is deprecated, and Vercel moved
-existing KV stores to Upstash in December 2024.
+There is no Redis any more. Upstash held the expiring state until it was
+folded into the database the archive already used; `KV_REST_API_URL` and
+`KV_REST_API_TOKEN` are read by nothing in `apps/web`.
 
 ## Tests
 
@@ -229,9 +228,8 @@ in `apps/web/.env.example`; setup in [`../DEPLOY.md`](../DEPLOY.md).
 | `SANDBOX_MOCK` | no | `1` lets a production build use the mock — a demo without the browser farm |
 | `SANDBOX_MOCK_FAIL` | no | `1` makes the mock fail at checkout: the refund path |
 | `ARS_PER_USD` | no | pin the rate so a demo quotes the same number every time. Unset means the live feed |
-| `KV_REST_API_URL`, `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` / `_TOKEN`) | in production | conversation history, quotas and checkout records across instances; falls back to an in-process Map. Production quotas fail closed without it |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | in production | the human gate. The secret alone decides it, and unset in production it fails shut |
-| `DATABASE_URL` | no | the chat archive for signed-in wallets. Unset, nothing is archived; orders do not need it |
+| `DATABASE_URL` | in production | conversation history, quotas and checkout records across instances (`kv`, `quota`), and the chat archive for signed-in wallets. Locally an in-process Map stands in; in production the quotas fail closed without it. Orders do not need it |
 | `OPENAI_API_KEY`, `OPENAI_MODEL` | no | if the key is set, the agent runs on OpenAI instead of Anthropic |
 | `AGENT_MODEL`, `AGENT_EFFORT`, `AGENT_USAGE` | no | Anthropic model override; the speed knob; per-hop token logging including cache reads and writes |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID`, `NEXT_PUBLIC_META_PIXEL_ID`, `NEXT_PUBLIC_CLARITY_PROJECT_ID` | no | analytics. Unset, nothing loads |

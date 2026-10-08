@@ -1,11 +1,12 @@
-import { Redis } from '@upstash/redis';
+import { hasDatabase } from '../db.ts';
+import { kvGet, kvSet } from '../kv.ts';
 
 /**
  * A checkout between the quote and the settle: what the shopper was quoted,
  * which sandbox job is buying it, and how it ended.
  *
- * Same shape as lib/agent/turn-store.ts: Redis when the Upstash pair is set,
- * an in-process Map when not, so a fresh clone runs. The Map lives on
+ * Same shape as lib/agent/turn-store.ts: the `kv` table when DATABASE_URL is
+ * set, an in-process Map when not, so a fresh clone runs. The Map lives on
  * `globalThis` because Next compiles each route into its own bundle, and
  * /quote, /start and /[orderId] must see the same one.
  *
@@ -57,20 +58,13 @@ interface Store {
   set(rec: CheckoutRecord): Promise<void>;
 }
 
-function credentials(): { url: string; token: string } | undefined {
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-  return url && token ? { url, token } : undefined;
-}
-
-function redisStore(url: string, token: string): Store {
-  const redis = new Redis({ url, token });
+function postgresStore(): Store {
   return {
     async get(orderId) {
-      return ((await redis.get(KEY(orderId))) as CheckoutRecord | null) ?? undefined;
+      return ((await kvGet(KEY(orderId))) as CheckoutRecord | undefined) ?? undefined;
     },
     async set(rec) {
-      await redis.set(KEY(rec.orderId), rec, { ex: TTL_SECONDS });
+      await kvSet(KEY(rec.orderId), rec, TTL_SECONDS);
     },
   };
 }
@@ -92,9 +86,6 @@ function memoryStore(): Store {
 let store: Store | undefined;
 
 export function checkoutStore(): Store {
-  if (!store) {
-    const creds = credentials();
-    store = creds ? redisStore(creds.url, creds.token) : memoryStore();
-  }
+  if (!store) store = hasDatabase() ? postgresStore() : memoryStore();
   return store;
 }

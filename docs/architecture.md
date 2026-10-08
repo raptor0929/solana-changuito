@@ -65,20 +65,18 @@ flowchart TB
         SOL["Solana devnet<br/><i>changuito_escrow · mock USDC mint</i>"]
         SBX["Sandbox on Railway<br/><i>FastAPI · Jev · Playwright · one Día account</i>"]
         DIA["Día checkout"]
-        REDIS[("Upstash Redis<br/><i>turn history 1h · checkout records 24h</i>")]
-        PG[("Postgres (optional)<br/><i>chat archive</i>")]
+        PG[("Supabase Postgres<br/><i>kv: turns 1h · checkouts 24h · quotas</i><br/>chat archive")]
     end
 
     CHAT <--> LS
     CHAT -->|"POST /api/chat"| API_CHAT --> MCPC --> VTEX
-    API_CHAT <--> REDIS
-    API_CHAT --> PG
+    API_CHAT <--> PG
     PRIVY -->|"access token"| API_SES
     CHAT --> CM
     CM -->|"quote, start, poll every 3s"| API_CK
     CM -->|"open: unsigned tx out, buyer-signed tx back"| API_CK
     CM -.->|"sign open"| PRIVY
-    API_CK <--> REDIS
+    API_CK <--> PG
     API_CK -->|"read Order PDA"| SOL
     API_CK -->|"POST /jobs · GET /jobs/:id"| SBX --> DIA
     API_CK --> RES -->|"open (fee payer) | settle | refund"| SOL
@@ -109,7 +107,7 @@ discriminator at byte 0, buyer at byte 40). The purchases list is therefore the
 same on every device, needs no `DATABASE_URL`, and cannot disagree with where
 the money actually is.
 
-The checkout record in Redis (`lib/checkout/store.ts`) holds only what the
+The checkout record in the `kv` table (`lib/checkout/store.ts`, 24h expiry) holds only what the
 chain does not: the quote, the sandbox job id, the last phase, the handoff
 link. Losing it is survivable — see [failure modes](#failure-modes).
 
@@ -187,8 +185,9 @@ server working inside a product.
 
 A streaming tool loop (`loop.ts`, max 12 hops) against `claude-sonnet-5` with
 the MCP tools and two render tools that take identifiers only, never prices.
-History lives in Redis (1h TTL), the visible transcript in localStorage, and an
-optional Postgres archive for signed-in wallets. The prompt tells the model to
+History lives in the Postgres `kv` table (1h expiry), the visible transcript in
+localStorage, and a durable `chat` archive for signed-in wallets in the same
+database. The prompt tells the model to
 say "USDC" and never to mention blockchain, Solana, devnet or escrow to the
 shopper. Everything else is in [`../CLAUDE.md`](../CLAUDE.md).
 
@@ -229,7 +228,7 @@ sequenceDiagram
     autonumber
     participant B as Browser (Privy)
     participant A as Next.js /api/checkout
-    participant R as Redis
+    participant R as Postgres (kv)
     participant S as Solana devnet
     participant X as Sandbox (Railway)
 
@@ -294,7 +293,7 @@ is kept as the on-chain record. A second close fails with `OrderClosed`.
 | Public devnet RPC answers 429 | confirmation polling (`waitFor`) treats a failed status call as a pause, up to 60s; a failed settle/refund leaves the order open and the next poll retries | in the vault until a poll succeeds |
 | Two polls arrive together (two tabs, retries) | per-instance `closing` set; chain status read before every close; the program rejects a second close with `OrderClosed`, which the route catches and reports on the next poll | closed exactly once |
 | Shopper closes the tab mid-job | the sandbox job keeps running, but **nothing settles or refunds until someone polls `/status` for that order** (reopening the checkout, or the buyer's self-refund after the 1h deadline) | in the vault |
-| Checkout record expires (Redis 24h TTL) or Redis is not configured on a multi-instance deploy | `/status` returns 404; the server can no longer close the order | in the vault; only the buyer's self-refund after the deadline recovers it |
+| Checkout record expires (`kv` 24h expiry) or `DATABASE_URL` is not set on a multi-instance deploy | `/status` returns 404; the server can no longer close the order | in the vault; only the buyer's self-refund after the deadline recovers it |
 | Resolver key missing or mismatched | `resolverSigner` refuses by name; faucet returns 503; `open` cannot be sent (502, nothing locked); settle/refund throw and the order stays open | in the vault, or still with the buyer if `open` never went out |
 | Resolver out of SOL | `open` fails at send (502, "No pudimos bloquear el pago"); settle/refund fail and retry on the next poll | still with the buyer, or in the vault until the resolver is topped up |
 | Price or envío differs at Día | not reconciled: the 15% buffer is the only cushion, and the whole locked amount goes to the treasury on settle | treasury |
@@ -315,7 +314,7 @@ changuito/
 │       ├── agent/           loop, prompt, render-tools, turn-store, early-ask
 │       ├── mcp/             boot (in-memory transport), bridge, session
 │       ├── checkout/        sandbox client + mock, escrow-server (resolver
-│       │                      side), open-tx (built server-side for /open), store (Redis)
+│       │                      side), open-tx (built server-side for /open), store (kv table)
 │       ├── server/          the resolver key — server-only
 │       ├── escrow.ts        hand-written @solana/kit client: PDAs, ixs, decode
 │       ├── solana.ts        RPC, send + confirm, Solscan links, units

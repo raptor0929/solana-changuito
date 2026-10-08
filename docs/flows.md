@@ -26,7 +26,7 @@ BROWSER                       /api/chat                     MCP        ANTHROPIC
    │                           │   warm Map hit, or boot a new
    │                           │   MCP pair and restore(snapshot)
    │                           │
-   │                           │ turns.get(sessionId)  ◄── Redis
+   │                           │ turns.get(sessionId)  ◄── Postgres (kv, 1h)
    │                           │
    │                           │ ┌─ hop 0..11 ────────────────────────────┐
    │                           │ │ messages.stream(model, tools, system)  │
@@ -40,7 +40,7 @@ BROWSER                       /api/chat                     MCP        ANTHROPIC
    │                           │ │ no tool calls → done                   │
    │                           │ └────────────────────────────────────────┘
    │                           │
-   │                           │ turns.set(sessionId, turn)  ──► Redis
+   │                           │ turns.set(sessionId, turn)  ──► Postgres (kv, 1h)
    │                           │ chat archive ──► Postgres (signed in only)
    │   ◄── done { snapshot } ──│
    │
@@ -195,9 +195,9 @@ timeout    = 3600s
   as its own field.
 - **`order_id` is random.** `open` rejects an id it has seen, which stops a
   double submit; a deliberate retry of the same basket must be a new order.
-- The quote is stored server-side (`lib/checkout/store.ts`: Upstash Redis,
-  24h TTL, an in-process Map without credentials) together with the
-  shopper's own cart link, `handoffUrl`.
+- The quote is stored server-side (`lib/checkout/store.ts`: the Postgres `kv`
+  table, 24h expiry, an in-process Map without `DATABASE_URL`) together with
+  the shopper's own cart link, `handoffUrl`.
 
 ### 3b. The lock
 

@@ -4,18 +4,19 @@
  * Three stores hold a chat now, and they are not redundant — they answer
  * different questions, and the split is deliberate:
  *
- * - **Redis** (`agent/turn-store.ts`) is the *working* store. The hop loop
- *   reads and writes it up to twelve times a turn, and it holds the Anthropic
- *   message list the model needs to keep going. One hour TTL, because an
- *   abandoned basket is not worth keeping overnight.
+ * - **The `kv` table** (`agent/turn-store.ts`) is the *working* store. The
+ *   hop loop reads and writes it up to twelve times a turn, and it holds the
+ *   Anthropic message list the model needs to keep going. One hour expiry,
+ *   because an abandoned basket is not worth keeping overnight. It was Redis
+ *   until the two stores were folded into one database.
  * - **localStorage** (`chat-store.ts`) is what the shopper *sees*: the history
  *   rail, the blocks, the receipt. It is also what decides a chat is no longer
  *   resumable, since it knows the hour has passed.
  * - **Postgres** — this file — is the *record*. It outlives the TTL, survives a
  *   cleared browser, and is what the purchases list joins an order back to.
  *
- * Redis stays the working store on purpose. Paying a Postgres round-trip on
- * every hop would be a visible slowdown for no benefit, so this writes once,
+ * The working store and the record stay separate on purpose, same database or
+ * not: `kv` rows expire and `chat` rows do not, and the archive writes once,
  * in the same place `turn-store.ts` writes: **only after a clean return.** That
  * rule matters more here than there. A turn that threw mid-hop can leave an
  * assistant `tool_use` with no matching `tool_result`, and a transcript
@@ -26,7 +27,7 @@
  * No `chg_user`, no row. `chat.address` is `not null` in the schema and that is
  * the enforcement, not an oversight — a transcript is a list of what somebody
  * bought and usually carries their postal code, so moving it from an hour in
- * Redis to durable Postgres is a real change in exposure. It happens only for
+ * an expiring row to a durable one is a real change in exposure. It happens only for
  * someone who proved a wallet. Reading it back is narrowed the same way, in
  * SQL rather than in a caller: see `loadChat` in db.ts.
  *
@@ -94,7 +95,7 @@ export async function archiveChat(i: ArchiveInput, deps: ArchiveDeps = REAL): Pr
       network: i.network,
       address: i.address,
       title: i.title,
-      // The same `v: 1` codec Redis gets, and for the same reason: `RenderCache
+      // The same `v: 1` codec the working turn gets, and for the same reason: `RenderCache
       // .products` is a Map, and `JSON.stringify` renders a Map as `{}` with no
       // error to notice. jsonb would store that silently too.
       transcript: encodeTurn(i.turn),

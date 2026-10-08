@@ -1,17 +1,17 @@
 /**
  * The only module in this app that opens a Postgres connection.
  *
- * Everything the money path needs to remember now lives here rather than in
+ * Everything the money path needs to remember lives here rather than in
  * Redis, and the reason is not preference. A card the customer keeps has no
  * expiry, and a binding with no expiry does not belong in a cache with an
  * eviction policy: `SET NX` gives atomicity but Redis can still drop the key
  * under memory pressure, at which point the next deposit mints a second card
  * for somebody who already has one. A primary key cannot be evicted.
  *
- * Redis is still the right home for what remains there — the agent's in-flight
- * turn and the local-model breaker are genuine cache workloads, read many times
- * a turn, and both already degrade safely (CLAUDE.md §4). What left Redis is
- * the part where being wrong costs a shopper money.
+ * The cache workloads followed later — the agent's in-flight turn, the
+ * checkout record and the quotas, all of which expire — into the `kv` and
+ * `quota` tables behind lib/kv.ts, so one credential runs the whole app. They
+ * keep their degrade rules (CLAUDE.md §4); only the store underneath changed.
  *
  * ## Three things about this connection specifically
  *
@@ -501,7 +501,7 @@ export async function ordersOf(net: NetworkId, address: string, limit = 50): Pro
  * `JSON.stringify` renders a Map as `{}` with no error at all, so a hand-rolled
  * shape loses every product silently and only shows it on rehydration. The
  * `v: 1` codec in lib/agent/turn-store.ts exists for exactly that, and the same
- * encoded object goes into `jsonb` that goes into Redis today.
+ * encoded object is what the `kv` table holds for the working turn.
  *
  * Called only after a clean return, which is the rule turn-store.ts already
  * keeps: a turn that threw mid-hop can leave an assistant `tool_use` with no

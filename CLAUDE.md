@@ -150,9 +150,15 @@ the agent re-asking a question the user had already answered while the page
 still showed every bubble — the user sees continuity the server does not have,
 which is the worst shape a bug can take.
 
-`turn-store.ts` puts it in Redis (Upstash REST) keyed by session, with a one
-hour TTL, and **falls back to the in-process Map when no credentials are set**
-so a fresh clone still runs.
+`turn-store.ts` puts it in Postgres keyed by session — the `kv` table behind
+`lib/kv.ts`, with a one hour expiry — and **falls back to the in-process Map
+when no `DATABASE_URL` is set** so a fresh clone still runs. It was Upstash
+Redis until the cache workloads were folded into the one database the archive
+already used: `kv` holds the turn and the checkout record, `quota` holds the
+chat and faucet counters, and every read carries `expires_at > now()` so a
+dead row is invisible before the opportunistic sweep reaches it. One
+consequence worth knowing: `DATABASE_URL` is now **required in production**,
+because the quotas fail closed without a shared counter.
 
 Three things to know before editing it:
 
@@ -182,14 +188,16 @@ restored blocks do not collide with new ones. A chat the server can no longer
 continue comes back **read-only** rather than pretending, which is what
 `isResumable` is for. Do not re-add the id to storage on its own.
 
-**Three stores hold a conversation, and they are not redundant.** Redis
-(`turn-store.ts`) is the working store the hop loop reads up to twelve times a
-turn, at a one hour TTL. localStorage (`chat-store.ts`) is what the shopper
-sees. Postgres (`chat-archive.ts` → the `chat` table) is the record: it outlives
-the TTL, survives a cleared browser, and is what an order is joined back to.
+**Three stores hold a conversation, and they are not redundant.** The `kv`
+table (`turn-store.ts`) is the working store the hop loop reads up to twelve
+times a turn, at a one hour expiry. localStorage (`chat-store.ts`) is what the
+shopper sees. The `chat` table (`chat-archive.ts`) is the record: it outlives
+the expiry, survives a cleared browser, and is what an order is joined back to.
+Two of the three are in the same database now, and they are still two stores:
+one expires and one does not.
 
 The archive is one write per turn, in the same place and under the same rule as
-the Redis one — **only after a clean return** — and it matters more there: a
+the working one — **only after a clean return** — and it matters more there: a
 transcript archived with an assistant `tool_use` that has no matching
 `tool_result` is a permanent copy of a pairing the API rejects. It is also
 **only for a signed-in wallet**. `chat.address` is `not null` and that is the
