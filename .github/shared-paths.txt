@@ -1,0 +1,25 @@
+# Paths that exist identically in both chain repos (stellar, solana).
+#
+# A pull request that touches any of these must carry the `shared` label, so
+# sync.yml carries it to the sibling repo when it merges — or the
+# `chain-only` label, to say on purpose that it must not. shared-label.yml
+# enforces that; sync.yml does the carrying.
+#
+# One prefix per line, matched against the start of each changed file's path.
+# Keep this file the same in both repos: it is itself a shared path.
+.github/
+packages/mcp/
+packages/trust/
+apps/web/lib/agent/
+apps/web/lib/kv.ts
+apps/web/lib/db.ts
+apps/web/lib/login-gate.ts
+apps/web/lib/login-constants.ts
+apps/web/lib/human-gate.ts
+apps/web/lib/chat-state.ts
+apps/web/lib/chat-store.ts
+apps/web/lib/chat-archive.ts
+apps/web/lib/turn-progress.ts
+apps/landing/
+services/sandbox/
+supabase/migrations/

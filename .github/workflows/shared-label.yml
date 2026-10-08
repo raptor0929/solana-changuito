@@ -1,0 +1,55 @@
+# A pull request that touches shared code has to say what the sibling repo
+# should do with it: `shared` (sync.yml carries it over on merge) or
+# `chain-only` (it stays here on purpose). Without one of the two, the check
+# fails and the PR cannot merge — a shared change that silently lands in one
+# repo is exactly the drift the two-repo setup is supposed to make visible.
+#
+# The list of shared paths is .github/shared-paths.txt, the same in both repos.
+name: Shared label
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check:
+    name: shared paths carry a label
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Changed files against shared-paths.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+        run: |
+          set -euo pipefail
+          changed=$(gh pr diff "$PR" --name-only)
+          hits=""
+          while IFS= read -r prefix; do
+            [ -z "$prefix" ] && continue
+            case "$prefix" in \#*) continue ;; esac
+            match=$(printf '%s\n' "$changed" | awk -v p="$prefix" 'index($0, p) == 1')
+            [ -n "$match" ] && hits="$hits"$'\n'"$match"
+          done < .github/shared-paths.txt
+          hits=$(printf '%s\n' "$hits" | sed '/^$/d' | sort -u)
+          if [ -z "$hits" ]; then
+            echo "No shared paths touched; no label needed."
+            exit 0
+          fi
+          echo "Shared paths touched:"
+          printf '  %s\n' $hits
+          case " $LABELS " in
+            *" shared "*)     echo "Label: shared — sync.yml will carry this PR to the sibling repo on merge." ;;
+            *" chain-only "*) echo "Label: chain-only — stays in this repo." ;;
+            *)
+              echo "::error::This PR touches shared paths (listed above) but has neither the 'shared' nor the 'chain-only' label. Add one: 'shared' syncs it to the sibling repo on merge, 'chain-only' keeps it here on purpose."
+              exit 1 ;;
+          esac
