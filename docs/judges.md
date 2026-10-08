@@ -15,7 +15,7 @@ read one section. It states what is simulated, by us, before you find it.
 |---|---|
 | **Live app** | [app.changuito.me](https://app.changuito.me). Everything below is verifiable from a local clone, which is the build this document describes |
 | **Marketing site** | [www.changuito.me](https://www.changuito.me) |
-| **Repository** | [github.com/raptor0929/solana-changuito](https://github.com/raptor0929/solana-changuito), branch `main` — MIT |
+| **Repository** | [github.com/tote-hq/solana](https://github.com/tote-hq/solana), branch `main` — MIT. The Stellar build lives in [tote-hq/stellar](https://github.com/tote-hq/stellar); only Solana work lands here, and PRs labeled `shared` are mirrored between the two |
 | **Built by** | [SimonethG](https://www.linkedin.com/in/simonethg/) and [Fabio](https://www.linkedin.com/in/fabio-laura-yavi/), in Argentina |
 | **Cluster** | Solana **devnet** only. There is no mainnet configuration in the code |
 | **What is on-chain** | an Anchor escrow: the shopper locks USDC, the backend resolver settles it to a treasury or refunds it. Every order is an account you can read |

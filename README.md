@@ -15,7 +15,8 @@ fails, the escrow refunds you, and nobody has to approve that by hand.
 
 | | |
 |---|---|
-| **Hackathon** | Crypto World's Fair (Solana Foundation × Colosseum) — [github.com/raptor0929/solana-changuito](https://github.com/raptor0929/solana-changuito) |
+| **Hackathon** | Crypto World's Fair (Solana Foundation × Colosseum) — [github.com/tote-hq/solana](https://github.com/tote-hq/solana) |
+| **Sibling repo** | [github.com/tote-hq/stellar](https://github.com/tote-hq/stellar), the Stellar build. Both share history up to `419304d`; shared code is carried across by labeled PRs (see `.github/workflows/sync.yml`) |
 | **Live app** | **[solana-changuito.vercel.app](https://solana-changuito.vercel.app)**, the official Solana deployment for now ([app.changuito.me](https://app.changuito.me) is the earlier Stellar build) |
 | **Network** | **Solana devnet only**: our own mock USDC mint, faucet in the app |
 | **Reviewing this?** | **[docs/judges.md](docs/judges.md)**: a 15-minute path through the repo, with claims mapped to evidence |
@@ -295,7 +296,7 @@ Requires **Node ≥ 22.12** (`.nvmrc`). The program is already deployed to devne
 so you only need Rust and Anchor to change it.
 
 ```bash
-git clone https://github.com/raptor0929/solana-changuito && cd solana-changuito
+git clone https://github.com/tote-hq/solana && cd solana
 npm install
 cp apps/web/.env.example apps/web/.env.local
 npm run dev            # http://localhost:3124
