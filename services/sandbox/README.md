@@ -34,16 +34,9 @@ uv sync
 uv run playwright install chromium
 ```
 
-Create `services/sandbox/.env` (git-ignored):
-
-```sh
-TYPESAFE_API_KEY=…
-DIA_ARG_DNI=…
-DIA_ARG_EMAIL=…
-DIA_ARG_PWD=…
-DIA_ARG_POSTCODE=…
-SANDBOX_TOKEN=some-long-random-string
-```
+Copy [`.env.example`](.env.example) to `.env` (git-ignored) and fill it in:
+the TypeSafe key, the Día account, the postcode and `SANDBOX_TOKEN`. Every
+variable is annotated there.
 
 Job API:
 
