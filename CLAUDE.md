@@ -390,6 +390,45 @@ half, `CheckoutModal.tsx` the browser half.
 
 ---
 
+## Two repos, one product
+
+This repo is one of two under `tote-hq`: **`stellar`** and **`solana`**. They
+share everything up to `419304d` and diverge from there — the chain layer
+(escrow, wallet, checkout) is different, and the agent, the MCP package, the
+landing, the gates and the migrations are the same code twice. The split
+exists so each chain's judges see only that chain's work, with real PRs,
+reviews and CI; it is not a monorepo with a mirror, and nothing syncs by
+itself.
+
+The rules, enforced by `.github/workflows/shared-label.yml` and carried out
+by `.github/workflows/sync.yml`:
+
+- **A PR that touches a path in `.github/shared-paths.txt` must carry one of
+  two labels**, or the check fails and it cannot merge. `shared` means: when
+  this merges, cherry-pick it into the sibling repo and open a PR there.
+  `chain-only` means: this touches shared paths but stays here on purpose —
+  the sibling already has it, or it must not have it.
+- **A `shared` PR becomes a `sync: …` PR in the sibling**, on a
+  `sync/<repo>-<pr>` branch, with the original author kept on the commit and
+  the source hash in its message (`-x`). Review it there like any other PR,
+  and merge it the same day: an unmerged sync PR is exactly the drift the
+  labels exist to make visible.
+- **A conflict opens an issue in the sibling, not a broken branch.** The
+  issue holds the exact commands; whoever owns that repo resolves it.
+- **Never label a `sync/…` PR `shared`.** The workflow skips those branches
+  anyway, but the label would be a lie.
+- **Merge by squash or merge commit, never rebase.** Rebase merging is off in
+  both repos because its `merge_commit_sha` is only the last of N commits and
+  the sync would carry one commit out of N.
+- **`.github/shared-paths.txt` is itself a shared path.** Edit it in one repo
+  with the `shared` label and let the sync carry it, so the two lists cannot
+  disagree about what is shared.
+
+Prefix PR titles with what the PR is — `stellar:`, `solana:` or `shared:` —
+because judges read titles, not diffs. Needs that are not in the repo:
+`SYNC_TOKEN` (a fine-grained PAT with Contents, Pull requests and Issues on
+both repos) as a secret in each, and the two labels.
+
 ## Things that are the way they are on purpose
 
 - **`MAX_HOPS = 12`.** A basket takes a handful of searches. Past this the model
