@@ -73,7 +73,7 @@ const CHECKOUT_CART = {
 };
 
 /** A real-length devnet address (the treasury in deployments.json), so the QR draws at the size a shopper sees. */
-const DEMO_ADDRESS = 'EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS';
+const DEMO_ADDRESS = '9TNtBk4RL2dmYdffqfudhLGc1DEtnHc8nmw7yWcD2ctc';
 
 export function Fixtures() {
   const [faucet, setFaucet] = useState<'empty' | 'full' | null>(null);

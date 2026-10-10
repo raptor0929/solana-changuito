@@ -12,33 +12,33 @@ export const DEPLOYMENTS = {
   devnet: {
     id: 'devnet',
     rpcUrl: 'https://api.devnet.solana.com',
-    deployedAt: '2026-10-04T15:35:00.668Z',
+    deployedAt: '2026-10-09T17:42:37.000Z',
     /** anchor/programs/changuito_escrow. */
-    programId: '9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9',
+    programId: 'BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d',
     /** The escrow's Config PDA: resolver, treasury and mint. */
-    config: 'BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ',
+    config: 'BCcorb5CVL86uDQQT4fBusAcobXugFfTTM6ypL4bDBPh',
     /** Our devnet USDC. The resolver is its mint authority (the faucet). */
-    usdcMint: '9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM',
+    usdcMint: 'BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85',
     usdcDecimals: 6,
     usdcCode: 'USDC',
     /** Backend hot key: signs settle, refund and faucet mints. */
-    resolver: 'AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5',
+    resolver: '5zeMdzZCXkCHbTwvoxtEHRHCP5fe7MLc4fHgG54ENhUD',
     /** Where a settled order's USDC ends up. The app never signs for it. */
-    treasury: 'EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS',
-    treasuryToken: 'HVsDJbwmsa2oTUpddQMSSUzKF6Z4PvQRU96d7n95owxa',
+    treasury: '9TNtBk4RL2dmYdffqfudhLGc1DEtnHc8nmw7yWcD2ctc',
+    treasuryToken: '6u1v9QbWXDA3WaU4j2c26sV9DomG7qRimNKch7VGnqcV',
   },
 } as const;
 
 /** Signatures that prove the deployment: deploy, initialize, smoke settle/refund. */
 export const EVIDENCE = {
-  "deploy": "3f3caazBpPsDmcvQnKzGgdM7H1GPMeNiZoD6Z8yq7H8JX8tdrEmfXMA2gBuDSNBbRqCsq51KF6VtLCG4SQ91YjmC",
-  "initialize": "3mWgS3g9iCju1J9p8s6563KRQfG3juVCX2mwFqURJB2oYVWzvAimMgPqxjMNsJUFY64unGUtBcwsyzsfoWUu7Xj2",
+  "deploy": "4rNtLVRC8iQzHcnXVweNUkJ8yQYV4dBvnpw1rVKJQDFHNJRosMnWW3VuCE1FpFRuDjiVmQXNK7ycZvt73PoS6ixz",
+  "initialize": "3ZQa77Kf83ddFtxG4oxxbWSAYCELEytnvwqzZVQkCxEuuixj45BAkjccZyfrnm6gEYsmj4iaee61ErXnWvyCNG6E",
   "smoke": {
-    "fund": "2bahH3CVovSMEKLELkjJUYq1JTtnJkLcxUGSHVc4UaiSDPj5MT2cB1SCVJAX4uJfoP4z5HM2rUDryCmmEqa6Cjux",
-    "settleOpen": "5Hw7m8aq638nYbY9MY5C8bDs4XC4AjqNAESgEVpErLMcYvkMkdmrghHUtQkR2k9Ex7XfWFzVnPsyHztzmuJJFNPr",
-    "settle": "z5Qq1C15CTsqC94R3mGrgEzqr29LNstTmFm4mEr3nVb3gY2Yna7LhL3mG2EoPuosiun9NLAKG77E3tSPCFjwew8",
-    "refundOpen": "C7VcfqHYVTNAkjP8T8isTWcfVhfewHgU4U8ZZQXEDnoMtLvLoiDrVf8Te4UwKS5zg7D45PdKbfmvrK8mVTgomNz",
-    "refund": "5GtMF7JvPdcog9d7oebhdwtgfw45yPY8Nh6mS6TE5pdXmBXcYad7saFPHsxriqUry4fYLAWqqXboKAM5HjFQA47e"
+    "fund": "7afnqiFKgQ3CgdwySV8qM7cqoxAJNbxPw7rwj2fx9jTZEtU11Fg7hSgUAaFEtzVQTrRG4P37Vx2BxqMTiSfkEhn",
+    "settleOpen": "5ww3W1FQGjnspyzpcjFSEJjjMzwX9ZWXsmp7Hm4BjEpS7VSwSD1rgqzwaqU7o6q4mzeTPjAHmWaQFJzXtUkdotBE",
+    "settle": "2Bmuhoev9j1HMFgi7RZ8mvsyvGt89CKwCNpvmc38NQnZhi2gsUPxYmjehgBtKrVSNZqxcfGuDn4CgH7BMbcr5o3B",
+    "refundOpen": "4v7AZfCMsqX3pF169j8L6xcThNHGjYRARZ3FHCRimtNCVu2evNaaBkWNSK4fKjoMCtb5CNTLyg9ZQoXTDfcu4LFM",
+    "refund": "3yvsvRXiV5Zue4rLPWhrBUpZMRyjJc2mAKsDHyzFLvTn7SxpV4ExqKh6rNMiT4Z9JusbzHsZB9ZFzTM9fsApYYpW"
   }
 } as const;
 

@@ -99,11 +99,11 @@ Full detail in **[docs/solana.md](docs/solana.md)**.
 
 | | Address (Solscan, devnet) |
 |---|---|
-| **Escrow program** `changuito_escrow` (Anchor 0.32) | [`9A2PXJaf…B2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet) |
-| **Config PDA** `["config"]`: resolver, treasury, mint. Set once; the program has no setter | [`BfMWiygm…yTQ`](https://solscan.io/account/BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ?cluster=devnet) |
-| **Mock USDC** (6 decimals, minted by the in-app faucet) | [`9rYNCiaa…tdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet) |
-| **Resolver**: settles, refunds, mints faucet USDC | [`AgTnHC9d…qQ5`](https://solscan.io/account/AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5?cluster=devnet) |
-| **Treasury**: receives settled baskets | [`EV5c3mjE…ZPS`](https://solscan.io/account/EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS?cluster=devnet) |
+| **Escrow program** `changuito_escrow` (Anchor 0.32) | [`BFa1gZL9…vLz9d`](https://solscan.io/account/BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d?cluster=devnet) |
+| **Config PDA** `["config"]`: resolver, treasury, mint. Set once; the program has no setter | [`BCcorb5C…BPh`](https://solscan.io/account/BCcorb5CVL86uDQQT4fBusAcobXugFfTTM6ypL4bDBPh?cluster=devnet) |
+| **Mock USDC** (6 decimals, minted by the in-app faucet) | [`BZ6CHGyR…LG85`](https://solscan.io/account/BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85?cluster=devnet) |
+| **Resolver**: settles, refunds, mints faucet USDC | [`5zeMdzZC…hUD`](https://solscan.io/account/5zeMdzZCXkCHbTwvoxtEHRHCP5fe7MLc4fHgG54ENhUD?cluster=devnet) |
+| **Treasury**: receives settled baskets | [`9TNtBk4R…ctc`](https://solscan.io/account/9TNtBk4RL2dmYdffqfudhLGc1DEtnHc8nmw7yWcD2ctc?cluster=devnet) |
 
 **What each piece does:**
 
@@ -122,8 +122,8 @@ These are ledger entries, not screenshots:
 
 | | Transaction |
 |---|---|
-| program deploy | [`3f3caazB…`](https://solscan.io/tx/3f3caazBpPsDmcvQnKzGgdM7H1GPMeNiZoD6Z8yq7H8JX8tdrEmfXMA2gBuDSNBbRqCsq51KF6VtLCG4SQ91YjmC?cluster=devnet) |
-| `initialize` | [`3mWgS3g9…`](https://solscan.io/tx/3mWgS3g9iCju1J9p8s6563KRQfG3juVCX2mwFqURJB2oYVWzvAimMgPqxjMNsJUFY64unGUtBcwsyzsfoWUu7Xj2?cluster=devnet) |
+| program deploy | [`4rNtLVRC…`](https://solscan.io/tx/4rNtLVRC8iQzHcnXVweNUkJ8yQYV4dBvnpw1rVKJQDFHNJRosMnWW3VuCE1FpFRuDjiVmQXNK7ycZvt73PoS6ixz?cluster=devnet) |
+| `initialize` | [`3ZQa77Kf…`](https://solscan.io/tx/3ZQa77Kf83ddFtxG4oxxbWSAYCELEytnvwqzZVQkCxEuuixj45BAkjccZyfrnm6gEYsmj4iaee61ErXnWvyCNG6E?cluster=devnet) |
 | app → faucet | [`36qKsuaG…`](https://solscan.io/tx/36qKsuaGykkY9NyrkGG4PKNArByv6fXJtf5bBNNj2sUoQ1cV7DGebdqZJnLXmkdEncZjkRoncaCFDeo6zWUzgqzL?cluster=devnet) |
 | app → `open` (5.06 USDC for a $6.150 ARS basket) | [`5aShGUf3…`](https://solscan.io/tx/5aShGUf3h1cJvNuLDUNZXjpBCBEf18bHkq8GpkcnN1D4yJaumBfNJkqNacRqMkBYq7r4FvEtnrTK1ZyRAyLze35Z?cluster=devnet) |
 | app → `settle` (vault → treasury) | [`32qUpErt…`](https://solscan.io/tx/32qUpErth2AG72KvXPCNSDX5NY9ftwsaH7u6SYSpZaB3N6b6Kz8csjhAWpNckTdsEkH53HPBQk2eySDrsjGR9a4K?cluster=devnet) |
@@ -214,7 +214,7 @@ Read this before the demo, not after it.
 - **The sandbox is not deployed to Railway yet**; it runs locally in Docker. Without `SANDBOX_URL` (locally or deployed), a mock job steps through the same phases in about 20 seconds (`SANDBOX_MOCK_FAIL=1` makes it fail, to show the refund).
 - **The resolver hot key also pays every shopper's `open` fee**, about 0.00001 SOL each, so it has to be kept topped up with devnet SOL. Abuse is bounded: a quote needs a signed-in session, and the resolver co-signs only the one message built for that quote.
 - **The resolver is a single server key.** It cannot redirect funds, because the treasury and the basket hash are fixed, but it can choose *when* to settle a basket that matches. A multisig or an attestation from the sandbox is the obvious hardening.
-- **The program is upgradeable.** It is on the upgradeable loader with the deployer key (`2AF3x8xh…t15k`) as upgrade authority, so "no setter" is a property of today's code, not a guarantee. Freezing it (`solana program set-upgrade-authority --final`) is a one-line step before anything holds real money.
+- **The program is upgradeable.** It is on the upgradeable loader with the deployer key (`57NLdwkH…UgFi`) as upgrade authority, so "no setter" is a property of today's code, not a guarantee. Freezing it (`solana program set-upgrade-authority --final`) is a one-line step before anything holds real money.
 - **No self-refund button yet.** The program lets the buyer refund after the deadline; the UI does not offer it, and a failed `/api/checkout/start` after `open` landed leaves the order waiting for that deadline.
 - **The Anchor program has no unit tests.** It is exercised by the deploy smoke run and the route-level e2e above.
 - **Prior work** is listed in its own section [below](#prior-work-and-what-was-built-for-this-hackathon).

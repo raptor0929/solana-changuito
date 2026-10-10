@@ -75,11 +75,11 @@ transactions are in [solana.md](solana.md); the flow is in
 
 | Account | Devnet address |
 |---|---|
-| Program `changuito_escrow` | [`9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet) |
-| Config PDA | [`BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ`](https://solscan.io/account/BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ?cluster=devnet) |
-| USDC mock mint (6 dp) | [`9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet) |
-| Resolver | [`AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5`](https://solscan.io/account/AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5?cluster=devnet) |
-| Treasury | [`EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS`](https://solscan.io/account/EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS?cluster=devnet) |
+| Program `changuito_escrow` | [`BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d`](https://solscan.io/account/BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d?cluster=devnet) |
+| Config PDA | [`BCcorb5CVL86uDQQT4fBusAcobXugFfTTM6ypL4bDBPh`](https://solscan.io/account/BCcorb5CVL86uDQQT4fBusAcobXugFfTTM6ypL4bDBPh?cluster=devnet) |
+| USDC mock mint (6 dp) | [`BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85`](https://solscan.io/account/BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85?cluster=devnet) |
+| Resolver | [`5zeMdzZCXkCHbTwvoxtEHRHCP5fe7MLc4fHgG54ENhUD`](https://solscan.io/account/5zeMdzZCXkCHbTwvoxtEHRHCP5fe7MLc4fHgG54ENhUD?cluster=devnet) |
+| Treasury | [`9TNtBk4RL2dmYdffqfudhLGc1DEtnHc8nmw7yWcD2ctc`](https://solscan.io/account/9TNtBk4RL2dmYdffqfudhLGc1DEtnHc8nmw7yWcD2ctc?cluster=devnet) |
 
 ## The sandbox service
 
