@@ -1,7 +1,8 @@
 /**
  * Devnet bring-up for the escrow, after `solana program deploy`:
  *
- *   1. initialize(resolver, treasury) — once; skipped when Config exists.
+ *   1. initialize(resolver, treasury) — once; skipped when Config exists —
+ *      and the treasury's token account, which settle needs to exist.
  *   2. Smoke: open → settle and open → refund, with the deployer as buyer.
  *   3. Write deployments.json (Solana shape).
  *
@@ -30,9 +31,9 @@ const RPC = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const load = async (n: string): Promise<KeyPairSigner> =>
   createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(join(KEYS, `${n}.json`), 'utf8'))));
 
-const PROGRAM = address('9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9');
-const MINT = address('9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM');
-const TREASURY = address('EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS');
+const PROGRAM = address('BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d');
+const MINT = address('BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85');
+const TREASURY = address('9TNtBk4RL2dmYdffqfudhLGc1DEtnHc8nmw7yWcD2ctc');
 
 const deployer = await load('deployer');
 const resolver = await load('resolver');
@@ -50,6 +51,13 @@ if (existing.value) {
   ], RPC);
   console.log(`initialize ${explorerTx(initSig)}`);
 }
+
+// settle requires the treasury's token account to exist already; it does not
+// create it. Idempotent, so a re-run against a live config is a no-op.
+await sendIxs(resolver, [
+  getCreateAssociatedTokenIdempotentInstruction({ payer: resolver, ata: treasuryToken, owner: TREASURY, mint: MINT }),
+], RPC);
+console.log(`treasury token ${treasuryToken}`);
 
 // 2. smoke
 const smoke: Record<string, string> = {};
@@ -86,7 +94,10 @@ if (!process.argv.includes('--no-smoke')) {
 
 // 3. deployments.json
 const path = join(root, 'deployments.json');
-const prev = (() => { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return {}; } })();
+const read = (() => { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return {}; } })();
+// A redeploy under a new program id is a new deployment: carrying the old
+// deployedAt and evidence forward would cite transactions on another program.
+const prev = read.cluster === 'devnet' && read.programId === PROGRAM ? read : {};
 const out = {
   cluster: 'devnet',
   rpcUrl: 'https://api.devnet.solana.com',
@@ -97,7 +108,7 @@ const out = {
   treasury: TREASURY,
   treasuryToken,
   config: cfg,
-  deployedAt: prev.cluster === 'devnet' ? prev.deployedAt : new Date().toISOString(),
+  deployedAt: prev.deployedAt ?? new Date().toISOString(),
   evidence: { ...(prev.evidence ?? {}), ...(initSig ? { initialize: initSig } : {}), ...(Object.keys(smoke).length ? { smoke } : {}) },
 };
 writeFileSync(path, JSON.stringify(out, null, 2) + '\n');
