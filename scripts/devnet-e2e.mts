@@ -12,6 +12,11 @@
  *
  * and prints the outcome with Solscan links. With SANDBOX_MOCK_FAIL=1 on the
  * dev server the same run ends in a refund instead of a settle.
+ *
+ * The quote is real: it reads belo's USDC rate and asks Día's simulation for
+ * the envío of a real SKU at E2E_POSTAL_CODE (default 1425). The Día login
+ * sent to /start is a placeholder, which is fine against the mock sandbox and
+ * will fail login against a real one — run that from the app instead.
  */
 import {
   generateKeyPairSigner,
@@ -45,19 +50,25 @@ const cart = {
   retailer: 'dia',
   cartId: 'e2e-' + Date.now(),
   lines: [
-    { index: 0, skuId: '1', sellerId: '1', name: 'Leche descremada 1L', quantity: 2, available: true,
-      unitPrice: { centavos: 157500, display: '$1.575,00' }, lineTotal: { centavos: 315000, display: '$3.150,00' } },
-    { index: 1, skuId: '2', sellerId: '1', name: 'Galletitas de avena 250g', quantity: 1, available: true,
-      unitPrice: { centavos: 300000, display: '$3.000,00' }, lineTotal: { centavos: 300000, display: '$3.000,00' } },
+    { index: 0, skuId: '61450', sellerId: '1', name: 'Fideos Tirabuzón Favorita 500 Gr.', quantity: 2, available: true,
+      unitPrice: { centavos: 115900, display: '$1.159,00' }, lineTotal: { centavos: 231800, display: '$2.318,00' } },
   ],
-  total: { centavos: 615000, display: '$6.150,00' },
+  total: { centavos: 231800, display: '$2.318,00' },
   messages: [],
 };
 const quote = (await call('/api/checkout/quote', {
   method: 'POST',
-  body: JSON.stringify({ cart, handoffUrl: 'https://diaonline.supermercadosdia.com.ar/checkout/?orderFormId=e2e#/cart' }),
+  body: JSON.stringify({
+    cart,
+    handoffUrl: 'https://diaonline.supermercadosdia.com.ar/checkout/?orderFormId=e2e#/cart',
+    location: { postalCode: process.env.E2E_POSTAL_CODE ?? '1425', salesChannel: '1', country: 'ARG' },
+  }),
 })) as QuoteResponse;
-console.log('quote', quote.amountDisplay, 'USDC for', cart.total.display, 'order', quote.orderId.slice(0, 12));
+const ars = (c: number) => `$${(c / 100).toFixed(2)}`;
+console.log(
+  'quote', quote.amountDisplay, 'USDC =', ars(quote.subtotalCentavos), '+ envío', ars(quote.shippingCentavos),
+  '@', quote.arsPerUsd.toFixed(2), `(${quote.rateSource})`, 'order', quote.orderId.slice(0, 12),
+);
 
 // What Privy does in the browser: sign the server's bytes as the buyer, no send.
 const { tx: unsigned } = await call('/api/checkout/open', { method: 'POST', body: JSON.stringify({ orderId: quote.orderId }) });
@@ -70,7 +81,7 @@ console.log('open', explorerTx(openSig));
 
 let status = (await call('/api/checkout/start', {
   method: 'POST',
-  body: JSON.stringify({ orderId: quote.orderId, openSig }),
+  body: JSON.stringify({ orderId: quote.orderId, openSig, dia: { email: 'e2e@example.com', password: 'e2e', dni: '30000000' } }),
 })) as StatusResponse;
 const t0 = Date.now();
 while (status.stage !== 'done' && status.stage !== 'refunded') {
@@ -79,4 +90,4 @@ while (status.stage !== 'done' && status.stage !== 'refunded') {
   status = (await call(`/api/checkout/status?orderId=${quote.orderId}`)) as StatusResponse;
   console.log('  ', status.stage, status.phase ?? '');
 }
-console.log(status.stage, status.closeSig ? explorerTx(status.closeSig) : '', 'handoff:', status.handoffUrl);
+console.log(status.stage, status.payment ?? '', status.storeOrderId ?? '', status.closeSig ? explorerTx(status.closeSig) : '');

@@ -1,16 +1,22 @@
 /**
- * POST /api/checkout/start { orderId, openSig? }  ->  StatusResponse
+ * POST /api/checkout/start { orderId, openSig?, dia: {email, password, dni}, address? }  ->  StatusResponse
  *
  * Called after the shopper's wallet sent `open`. The server believes the
  * chain, not the browser: the Order account must exist, belong to the cookie's
  * wallet, be open, lock at least the quoted amount and commit to the quoted
  * basket. Only then does the sandbox start spending effort on it.
  *
+ * `dia` is the shopper's Día login: the sandbox buys in their account, so the
+ * order is theirs and goes to their address. It is passed to `startJob` and
+ * dropped — never written to the checkout record, never logged. A password
+ * in a cache with a 24 hour expiry is still a password in a cache.
+ *
  * Idempotent: a second call for an order that already has a job returns the
  * same status rather than starting a second job.
  */
 import { readOrder } from '../../../../lib/checkout/escrow-server.ts';
 import { startJob } from '../../../../lib/checkout/sandbox.ts';
+import { readShopper } from '../../../../lib/checkout/shopper.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
 import type { StatusResponse } from '../../../../lib/checkout/types.ts';
 import { readLoggedInUser } from '../../../../lib/login-gate.ts';
@@ -22,7 +28,12 @@ export async function POST(req: Request): Promise<Response> {
   const user = await readLoggedInUser(req);
   if (!user.ok) return Response.json({ error: 'Iniciá sesión para pagar.' }, { status: 401 });
 
-  const body = (await req.json().catch(() => null)) as { orderId?: unknown; openSig?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as {
+    orderId?: unknown;
+    openSig?: unknown;
+    dia?: unknown;
+    address?: unknown;
+  } | null;
   const orderId = typeof body?.orderId === 'string' && /^[0-9a-f]{64}$/.test(body.orderId) ? body.orderId : null;
   if (!orderId) return Response.json({ error: 'Pedido inválido.' }, { status: 400 });
 
@@ -31,6 +42,8 @@ export async function POST(req: Request): Promise<Response> {
   if (!rec || rec.buyer !== user.address) return Response.json({ error: 'No encontramos ese pedido.' }, { status: 404 });
 
   if (!rec.jobId) {
+    const shopper = readShopper(body?.dia, body?.address, rec.postalCode);
+    if (!shopper) return Response.json({ error: 'Completá tu email, contraseña y DNI de Día.' }, { status: 400 });
     // A just-confirmed transaction can lag one RPC node behind another.
     let order = await readOrder(orderId);
     for (let i = 0; !order && i < 4; i++) {
@@ -50,10 +63,12 @@ export async function POST(req: Request): Promise<Response> {
       rec.jobId = await startJob(
         orderId,
         rec.lines.map((l) => ({ name: l.name, quantity: l.quantity, sku: l.skuId })),
+        shopper,
       );
     } catch (err) {
       // No job means nothing will settle it: the status poll refunds.
-      console.error('[checkout/start]', err);
+      // The error is ours (status, network); the request body is never in it.
+      console.error('[checkout/start]', err instanceof Error ? err.message : 'startJob failed');
       rec.error = 'No pudimos arrancar la compra.';
       rec.jobId = 'none';
     }
@@ -65,6 +80,8 @@ export async function POST(req: Request): Promise<Response> {
     orderId,
     stage: 'shopping',
     phase: rec.phase ?? null,
+    payment: rec.payment ?? null,
+    storeOrderId: rec.storeOrderId ?? null,
     openSig: rec.openSig ?? null,
     closeSig: null,
     handoffUrl: null,

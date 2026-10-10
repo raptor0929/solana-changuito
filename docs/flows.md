@@ -179,14 +179,17 @@ sequenceDiagram
 ```
 orderId    = crypto.getRandomValues(32)          random, NOT derived
 basketHash = sha256(canonicalBasket(cart))       lib/order.ts
-amount     = arsToUsdCents(total, arsPerUsd, 0.15)  @changuito/mcp/fx
-             (ARS_PER_USD pins the rate; otherwise the live feed)
+shipping   = Día's orderForms/simulation at the shopper's postal code,
+             same SLA rule as the sandbox     lib/checkout/shipping.ts
+arsPerUsd  = belo USDC compra (dolarapi)      lib/checkout/rate.ts
+             (ARS_PER_USD pins the rate; no other fallback)
+amount     = arsToUsdCents(total + shipping, arsPerUsd, QUOTE_BUFFER=0)
 timeout    = 3600s
 ```
 
-- **The 15% is for envío**, which the store only reveals at checkout — after
-  the money is locked. It is float, not price, and on settle it goes to the
-  treasury with the rest. That is a demo simplification and is stated as one.
+- **The envío is its own line**, quoted the way the sandbox will pick it, so
+  the modal shows products, envío, total, rate and USDC before anything is
+  locked. A postal code Día does not deliver to is refused at the quote.
 - **`basket_hash` commits to the exact basket** — retailer, cart id, each
   line's index, SKU, quantity, line total and availability, and the total —
   as a versioned line-oriented text, not `JSON.stringify`, because a hash is a
@@ -242,7 +245,8 @@ refunds.
 `services/sandbox` ([sandbox.md](sandbox.md)) is a Python worker: Jev
 (TypeSafe's System One model, which answers typed questions and never
 generates text) picks among the visible controls, and Playwright executes the
-choice on Día's real site, in four phases. The dialog shows each one:
+choice on Día's real site. Jev only logs in; the cart (by SKU), the envío and
+the card are deterministic (`checkout.py`). The dialog shows each phase:
 
 | Phase | Shown as |
 |---|---|
@@ -250,47 +254,45 @@ choice on Día's real site, in four phases. The dialog shows each one:
 | `login` | Entrando a Día… |
 | `empty_cart` | Vaciando el carrito de Día… |
 | `shop` | Cargando los productos en Día… |
-| `checkout` | Pasando por la caja… |
-| `payment` | Llegando al pago… |
+| `checkout` | Eligiendo envío y pasando por la caja… |
+| `payment` | Pagando con tarjeta… |
 
-It **stops at the card form**. It is never offered a "comprar / confirmar /
-pagar" control, and the order and payment endpoints (`/transaction`,
-`/payments`, `gatewayCallback`, `orderPlaced`) are aborted at the network
-level. One job at a time, because there is one operator Día account and its
-cart is bound to its session.
+It logs into **the shopper's** Día account with the login they typed in the
+modal (passed through, never stored) and pays with **the operator's** card,
+pressing Pay only when `CARD_*` is configured; until the card is typed the
+order and payment endpoints stay aborted at the network level. Jev is never
+offered a "comprar / confirmar / pagar" control. One job at a time: one
+browser, one card.
 
 Without `SANDBOX_URL` (local development) an in-process mock walks the same
 phases on a clock — login 0s, empty_cart 4s, shop 7s, checkout 15s, payment
-20s — and reports `reached_payment`. `SANDBOX_MOCK_FAIL=1` makes it fail at
-checkout, which is the refund path. In production without `SANDBOX_URL` the
+20s, placed 24s — and reports `payment: "placed"`. `SANDBOX_MOCK_FAIL=1` makes
+the card come back declined, which is the refund path. In production without `SANDBOX_URL` the
 checkout is off unless `SANDBOX_MOCK=1`.
 
-### 3e. Settle, and the handoff
+### 3e. Settle
 
-When a poll finds `reached_payment`, the status route settles:
+When a poll finds `payment: "placed"`, the status route settles:
 
 ```
 receipt = canonicalReceipt(order, buyer, basket, amount, settledAt)
-          with basis|sandbox-reached-payment
+          with basis|sandbox-order-placed
           + job|<sandbox job id>
-          + orderform|<the sandbox's own Día orderFormId>
+          + orderform|<the Día orderFormId it bought with>
+          + store-order|<Día's order number>
 settle(basket_hash, sha256(receipt))      resolver-signed
    vault → treasury, vault closed (rent → buyer), status Settled,
    receipt_hash stored on the Order account
 ```
 
-The shopper sees **¡Compra completada!**, an **Abrir en Día** button, and
-Solscan links for the lock (*Bloqueo*) and the release (*Liberación*).
+The shopper sees **¡Compra completada!** with Día's order number, and Solscan
+links for the lock (*Bloqueo*) and the release (*Liberación*). A declined card
+shows its own refund line.
 
-**Abrir en Día opens the shopper's own cart**, the `handoffUrl` the agent got
-from `get_cart_link` (`…/checkout/?orderFormId=…#/cart`) — **not** the
-sandbox's cart. The sandbox's cart belongs to the operator's Día account;
-opening it would show the shopper somebody else's profile and address. Its
-`orderFormId` goes into the receipt hash as evidence, and nowhere on screen.
-
-What "settled" means, precisely: *the agent proved this basket could be
-carried to Día's payment step.* It is not *Día confirmed an order*. The
-shopper still pays Día at the store, from the handoff link.
+What "settled" means, precisely: *Día placed this order in the shopper's
+account and our card paid for it.* Today Día refuses the transaction with
+`CHK0082` (reCAPTCHA token required), so no run reaches it and every run
+refunds; see [sandbox.md](sandbox.md).
 
 ### 3f. Close is idempotent
 

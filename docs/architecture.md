@@ -24,16 +24,16 @@ it in USDC on Solana devnet. Five pieces, each with one job:
 
 What this demo does **not** do, stated up front:
 
-- **No order is placed at Día.** The sandbox stops at the payment step; card
-  entry is out of scope and order/payment endpoints are aborted at the network
-  level. A settle means "the agent proved it could carry this basket to Día's
-  checkout". The shopper finishes the purchase at Día through their own cart
-  link.
+- **No order is placed at Día yet.** The sandbox logs into the shopper's Día
+  account, fills the basket, types the operator's card and presses Pay, but
+  Día refuses the transaction with `CHK0082` (reCAPTCHA token required), so
+  every run refunds. Settle is wired to a placed order and nothing else
+  ([sandbox.md](sandbox.md)).
 - **Devnet only, mock USDC.** The mint is ours (`BZ6CHG…LG85`), minted by the
   in-app faucet.
-- **The 15% FX buffer goes to the treasury** with the rest on settle. It exists
-  because envío is only known at checkout, after the money is locked; returning
-  the unused part is not implemented.
+- **The quote is a quote.** Goods plus the envío from Día's simulation, at
+  belo's USDC rate; the card pays whatever Día charges at purchase time, and
+  the treasury absorbs the difference either way.
 - **The sandbox runs one job at a time**, and adds one unit per line (quantity
   is recorded, not applied yet).
 
@@ -120,8 +120,9 @@ link. Losing it is survivable — see [failure modes](#failure-modes).
   (`canonicalBasket` in `lib/order.ts`: retailer, cart id, each line's sku,
   quantity, line total and availability, and the total) — not
   `JSON.stringify`, because key order is not a promise;
-- `amount` = peso total at today's ARS/USD rate plus 15%, in USDC base units
-  (`arsToUsdCents` from `@changuito/mcp/fx`; `ARS_PER_USD` overrides the rate);
+- `amount` = goods + envío in pesos at belo's USDC `compra`, in USDC base
+  units (`lib/checkout/rate.ts`, `lib/checkout/shipping.ts`; `ARS_PER_USD`
+  overrides the rate, `QUOTE_BUFFER` adds slack, default 0);
 - `timeout_secs` = 3600.
 
 `/api/checkout/start` then refuses to start any work until the chain agrees:
@@ -152,8 +153,8 @@ topped up with devnet SOL.
 There is no worker in the web app. `GET /api/checkout/status` is the only place
 that closes an escrow, and it does so as a side effect of being polled:
 
-- job `done` with `reached_payment` → `settle` (vault → treasury);
-- job `failed`, job `done` without payment, job lost (404), or no job at all →
+- job `done` with `payment: "placed"` → `settle` (vault → treasury);
+- job `failed`, job `done` with any other payment outcome, job lost (404), or no job at all →
   `refund` (vault → buyer);
 - sandbox unreachable (any other error) → nothing; keep polling.
 
@@ -296,7 +297,7 @@ is kept as the on-chain record. A second close fails with `OrderClosed`.
 | Checkout record expires (`kv` 24h expiry) or `DATABASE_URL` is not set on a multi-instance deploy | `/status` returns 404; the server can no longer close the order | in the vault; only the buyer's self-refund after the deadline recovers it |
 | Resolver key missing or mismatched | `resolverSigner` refuses by name; faucet returns 503; `open` cannot be sent (502, nothing locked); settle/refund throw and the order stays open | in the vault, or still with the buyer if `open` never went out |
 | Resolver out of SOL | `open` fails at send (502, "No pudimos bloquear el pago"); settle/refund fail and retry on the next poll | still with the buyer, or in the vault until the resolver is topped up |
-| Price or envío differs at Día | not reconciled: the 15% buffer is the only cushion, and the whole locked amount goes to the treasury on settle | treasury |
+| Price or envío differs at Día | not reconciled: the card pays Día's real total, the locked amount (quoted with the same envío rule) goes to the treasury on settle | treasury |
 
 ---
 

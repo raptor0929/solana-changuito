@@ -4,13 +4,13 @@
  * The checkout dialog polls this every few seconds. Each poll asks the
  * sandbox how far it got and, when the job is over, closes the escrow:
  *
- *   - reached Día's card step  -> settle: vault -> treasury, receipt on chain
- *   - failed, lost, or no job  -> refund: vault -> buyer
+ *   - Día placed the order       -> settle: vault -> treasury, receipt on chain
+ *   - anything else              -> refund: vault -> buyer
  *
- * The order is not placed at Día — the sandbox stops at the card form, which
- * it cannot fill. Reaching it is the evidence that the basket was buyable at
- * the store, and that is what this demo settles on. The shopper gets their
- * own cart link (`handoffUrl`) to finish there.
+ * "Anything else" includes a declined card, a card that was never tried (the
+ * sandbox has no CARD_* configured) and a run that never reached payment.
+ * The treasury keeps the USDC only when the operator's card actually paid
+ * for the shopper's order; the receipt carries Día's order number.
  *
  * Idempotent by reading the chain first: a closed order is reported, never
  * closed again.
@@ -36,6 +36,8 @@ function reply(rec: CheckoutRecord, stage: StatusResponse['stage']): Response {
     orderId: rec.orderId,
     stage,
     phase: rec.phase ?? null,
+    payment: rec.payment ?? null,
+    storeOrderId: rec.storeOrderId ?? null,
     openSig: rec.openSig ?? null,
     closeSig: rec.closeSig ?? null,
     handoffUrl: stage === 'done' ? rec.handoffUrl : null,
@@ -43,6 +45,14 @@ function reply(rec: CheckoutRecord, stage: StatusResponse['stage']): Response {
     error: rec.error ?? null,
   };
   return Response.json(res, { headers: { 'cache-control': 'no-store' } });
+}
+
+/** Why the USDC went back, in words the shopper can act on. Never the store's raw text. */
+function refundReason(status: string, payment: string): string {
+  if (payment === 'declined') return 'Día rechazó el pago con tarjeta.';
+  if (payment === 'not_attempted' && status === 'done') return 'La compra llegó al pago pero no se intentó pagar.';
+  if (payment === 'error') return 'No pudimos completar el pago en Día.';
+  return 'La compra no llegó al pago en Día.';
 }
 
 export async function GET(req: Request): Promise<Response> {
@@ -66,12 +76,16 @@ export async function GET(req: Request): Promise<Response> {
     try {
       const job = await readJob(rec.jobId);
       rec.phase = job.phase;
-      if (job.status === 'done' && job.result?.reached_payment) {
-        finished = 'settle';
-        rec.storeOrderForm = job.result.cart?.orderFormId;
-      } else if (job.status === 'done' || job.status === 'failed') {
-        finished = 'refund';
-        rec.error = job.error ?? 'La tienda no llegó al pago.';
+      if (job.status === 'done' || job.status === 'failed') {
+        rec.payment = job.result?.payment ?? 'not_attempted';
+        rec.storeOrderForm = job.result?.cart?.orderFormId;
+        if (job.status === 'done' && rec.payment === 'placed') {
+          finished = 'settle';
+          rec.storeOrderId = job.result?.store_order_id ?? undefined;
+        } else {
+          finished = 'refund';
+          rec.error = refundReason(job.status, rec.payment);
+        }
       }
     } catch (err) {
       // A sandbox we cannot reach is not yet a failed job; keep polling. The
@@ -98,8 +112,8 @@ export async function GET(req: Request): Promise<Response> {
             basketHash: order.basketHash,
             amountUnits: order.amount.toString(),
             settledAt: new Date().toISOString(),
-          }).replace('basis|buyer-confirmed', 'basis|sandbox-reached-payment') +
-          `job|${rec.jobId}\norderform|${rec.storeOrderForm ?? ''}\n`;
+          }).replace('basis|buyer-confirmed', 'basis|sandbox-order-placed') +
+          `job|${rec.jobId}\norderform|${rec.storeOrderForm ?? ''}\nstore-order|${rec.storeOrderId ?? ''}\n`;
         rec.closeSig = await settleOrder(order, createHash('sha256').update(receipt).digest());
       } else {
         rec.closeSig = await refundOrder(order);

@@ -6,14 +6,18 @@
  * the instruction from these and the shopper's wallet signs it; the server
  * never touches the buyer's money until it has the order on chain.
  *
- * The amount is the peso total at today's rate plus 15%: the sandbox learns
- * the envío only at Día's checkout, after the money is locked. The buffer is
- * float, not price — it goes to the treasury with the rest on settle, which
- * is a demo simplification the README says out loud.
+ * The amount is the goods plus the envío, at belo's USDC rate
+ * (lib/checkout/rate.ts). The envío comes from VTEX's simulation at the
+ * shopper's postal code, picked by the same rule the sandbox uses at Día's
+ * checkout (lib/checkout/shipping.ts), so the modal shows it as its own line
+ * instead of hiding it in a buffer. QUOTE_BUFFER (default 0) adds slack on
+ * top if a window's price starts moving between quote and run.
  */
-import { arsToUsdCents, getArsPerUsd } from '@changuito/mcp/fx';
+import { arsToUsdCents } from '@changuito/mcp/fx';
 import type { Cart } from '@changuito/mcp/types';
 
+import { quoteRate } from '../../../../lib/checkout/rate.ts';
+import { NO_DELIVERY, quoteShipping, type ShippingLocation } from '../../../../lib/checkout/shipping.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
 import type { QuoteResponse } from '../../../../lib/checkout/types.ts';
 import { DEPLOYMENTS } from '../../../../lib/deployments.ts';
@@ -25,7 +29,15 @@ import { usdcToBase } from '../../../../lib/solana.ts';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const BUFFER = 0.15;
+function buffer(): number {
+  const b = Number(process.env.QUOTE_BUFFER ?? 0);
+  return Number.isFinite(b) && b >= 0 && b <= 0.5 ? b : 0;
+}
+
+function isLocation(l: unknown): l is ShippingLocation {
+  const x = l as ShippingLocation;
+  return Boolean(x && typeof x.postalCode === 'string' && /^[A-Za-z0-9]{4,8}$/.test(x.postalCode));
+}
 
 function isCart(c: unknown): c is Cart {
   const x = c as Cart;
@@ -36,7 +48,7 @@ export async function POST(req: Request): Promise<Response> {
   const user = await readLoggedInUser(req);
   if (!user.ok) return Response.json({ error: 'Iniciá sesión para pagar.' }, { status: 401 });
 
-  const body = (await req.json().catch(() => null)) as { cart?: unknown; handoffUrl?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { cart?: unknown; handoffUrl?: unknown; location?: unknown } | null;
   if (!isCart(body?.cart)) return Response.json({ error: 'Falta el changuito.' }, { status: 400 });
   const cart = body.cart;
   const lines = cart.lines.filter((l) => l.available && l.quantity > 0);
@@ -44,9 +56,29 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: 'El changuito está vacío.' }, { status: 400 });
   }
 
+  // The postal code the shopper browsed with: prices, stock and envío are all quoted per area.
+  if (!isLocation(body.location)) {
+    return Response.json({ error: 'Falta tu código postal. Contale al chat dónde estás y volvé a intentar.' }, { status: 400 });
+  }
+  const location = body.location;
+
   const override = Number(process.env.ARS_PER_USD);
-  const rate = await getArsPerUsd(Number.isFinite(override) && override > 0 ? { override } : {});
-  const cents = arsToUsdCents(cart.total.centavos as never, rate.arsPerUsd, BUFFER) as unknown as number;
+  let rate, shipping;
+  try {
+    [rate, shipping] = await Promise.all([
+      quoteRate(Number.isFinite(override) && override > 0 ? { override } : {}),
+      quoteShipping(cart.retailer, lines, location),
+    ]);
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    console.warn('[checkout] quote failed', why);
+    if (why.startsWith(NO_DELIVERY)) {
+      return Response.json({ error: 'Día no hace envíos a domicilio a tu código postal.' }, { status: 409 });
+    }
+    return Response.json({ error: 'No pudimos cotizar el envío o el cambio. Probá de nuevo en un rato.' }, { status: 503 });
+  }
+  const totalCentavos = cart.total.centavos + shipping.centavos;
+  const cents = arsToUsdCents(totalCentavos as never, rate.arsPerUsd, buffer()) as unknown as number;
   const orderId = bytesToHex(newOrderId());
   const hash = bytesToHex(await basketHash(cart));
   const handoffUrl =
@@ -59,6 +91,9 @@ export async function POST(req: Request): Promise<Response> {
     amountCents: cents,
     basketHash: hash,
     arsPerUsd: rate.arsPerUsd,
+    rateSource: rate.source,
+    shippingCentavos: shipping.centavos,
+    postalCode: location.postalCode,
     totalDisplay: cart.total.display,
     retailer: cart.retailer,
     lines: lines.map((l) => ({ name: l.name, skuId: l.skuId, quantity: l.quantity, lineTotal: l.lineTotal.display })),
@@ -74,6 +109,10 @@ export async function POST(req: Request): Promise<Response> {
     basketHash: hash,
     timeoutSecs: DEFAULT_TIMEOUT_SECS,
     arsPerUsd: rate.arsPerUsd,
+    rateSource: rate.source,
+    subtotalCentavos: cart.total.centavos,
+    shippingCentavos: shipping.centavos,
+    totalCentavos,
     programId: DEPLOYMENTS.devnet.programId,
     usdcMint: DEPLOYMENTS.devnet.usdcMint,
   };

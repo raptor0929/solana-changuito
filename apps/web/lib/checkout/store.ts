@@ -24,6 +24,11 @@ export interface CheckoutRecord {
   /** Hex. */
   basketHash: string;
   arsPerUsd: number;
+  rateSource?: string;
+  /** Envío quoted at `postalCode`, in centavos; part of `amount`. */
+  shippingCentavos?: number;
+  /** Where the shopper browsed: the sandbox delivers here when their Día account has no saved address. */
+  postalCode?: string;
   /** Pesos as the shopper saw them. */
   totalDisplay: string;
   retailer: string;
@@ -45,8 +50,12 @@ export interface CheckoutRecord {
   phase?: string;
   outcome?: 'settled' | 'refunded';
   closeSig?: string;
-  /** The sandbox's own cart id at the store: evidence, never shown as a link. */
+  /** The store's cart id the sandbox bought with: evidence, never shown as a link. */
   storeOrderForm?: string;
+  /** What the store answered to the card: placed, declined, not_attempted, error. */
+  payment?: string;
+  /** Día's order number, when the order was placed. */
+  storeOrderId?: string;
   error?: string;
 }
 

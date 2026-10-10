@@ -7,9 +7,10 @@ the basket.**
 You ask for a basket in plain Spanish. The agent searches a real store's live
 catalogue, compares real prices and builds a real cart. You pay in USDC from an
 email login, without a seed phrase or gas. The USDC is locked in an escrow
-program on Solana. A sandboxed browser agent then walks the store's own checkout
-with that basket. If it reaches the payment step, the escrow settles. If it
-fails, the escrow refunds you, and nobody has to approve that by hand.
+program on Solana. A sandboxed browser agent then logs into your own account
+at the store and buys that basket with our card. If the store places the
+order, the escrow settles. If anything else happens, the escrow refunds you,
+and nobody has to approve that by hand.
 
 *changuito* is what an Argentine calls a shopping trolley.
 
@@ -74,9 +75,9 @@ flowchart TD
     B --> C["A real cart, drawn as a card<br/>with the store's own cart link"]
     C --> D["Pagar → email login with Privy<br/><i>embedded Solana wallet, no seed phrase</i>"]
     D --> E["Lock USDC in escrow<br/><i>fee paid by the resolver</i>"]
-    E --> F["Sandbox agent fills the same basket on Día<br/>login → cart → checkout → payment step"]
-    F -->|reached payment| G["settle: vault → treasury<br/>¡Compra completada! + handoff link"]
-    F -->|failed / lost| H["refund: vault → buyer"]
+    E --> F["Sandbox agent buys the basket in your Día account<br/>login → cart by SKU → envío → pay by card"]
+    F -->|order placed| G["settle: vault → treasury<br/>¡Compra completada! + Día order number"]
+    F -->|declined / failed / lost| H["refund: vault → buyer"]
 ```
 
 ```mermaid
@@ -208,8 +209,8 @@ More: **[docs/architecture.md](docs/architecture.md)**.
 Read this before the demo, not after it.
 
 - **Devnet only, with mock USDC.** The mint is ours and the faucet hands it out. Nothing in this branch touches mainnet.
-- **The 15% buffer goes to the treasury.** The quote is `ARS total ÷ rate × 1.15`, because envío is only known at checkout. On settle the whole amount moves, buffer included. A production version settles the exact amount and refunds the difference.
-- **The sandbox adds one unit per line**, and searches by product name only. It ignores `sku` and records `quantity` without applying it yet.
+- **The quote is goods + envío at belo's USDC rate.** The envío comes from Día's own simulation at the shopper's postal code, by the same rule the sandbox uses to pick delivery; the rate is belo's USDC `compra` from dolarapi, so the treasury absorbs the ~1.6% compra/venta spread. Prices can still move between quote and purchase.
+- **Día's checkout currently refuses the payment.** The sandbox fills the basket by SKU, sets the envío, types the card and presses Pay, but Día answers `CHK0082` (reCAPTCHA token required) before the card is evaluated, so no order is placed yet and every run refunds. Details in [docs/sandbox.md](docs/sandbox.md).
 - **The live sandbox reaches the payment step, verified end to end on a two-item basket.** `scripts/devnet-e2e.mts` against a local Docker sandbox and Día (2026-10-04, the operator's real account): resolver-paid `open`, login, empty cart, 2/2 items added, *Envío programado* chosen in the delivery modal, `/checkout/#/payment` reached in 214 seconds, then [settle](https://solscan.io/tx/3akyS29xEdce7Phd7TrVaPoTzxjWaf7Uum5Xn8g9nxgRafJZmvBgN28ahm94Yu8bzoQDtmR2G9L325RSPePearWP?cluster=devnet). Earlier runs looped in that modal: it now needs the *Envío programado* radio before *Confirmar* enables, and the harness had collapsed both delivery radios into one option. That fix is ours, not upstream's ([UPSTREAM.md](services/sandbox/UPSTREAM.md)). Search is by name, so a loose match can stand in for the requested product (in that run "Galletitas de avena 250g" became Galletitas Mantequitas 250 g). Larger baskets have not been run live.
 - **The sandbox is not deployed to Railway yet**; it runs locally in Docker. Without `SANDBOX_URL` (locally or deployed), a mock job steps through the same phases in about 20 seconds (`SANDBOX_MOCK_FAIL=1` makes it fail, to show the refund).
 - **The resolver hot key also pays every shopper's `open` fee**, about 0.00001 SOL each, so it has to be kept topped up with devnet SOL. Abuse is bounded: a quote needs a signed-in session, and the resolver co-signs only the one message built for that quote.
@@ -241,7 +242,7 @@ is made in the middle, and the costs are on the last hop.
 | | Hypothesis to test |
 |---|---|
 | **Revenue: service fee** | A flat percentage on the basket, shown at quote time. A shopper abroad compares it with the cost of a remittance plus a phone call, not with a free supermarket app |
-| **Revenue: FX** | The quote converts at a published rate. The buffer that today covers envío becomes an explicit, refunded-if-unused line |
+| **Revenue: FX** | The quote converts at a published exchange rate (belo's USDC quote), with envío as its own line. A spread on that rate is a lever |
 | **Cost: paying the store** | The treasury pays Día's checkout with a card funded from settled USDC. Card issuance and interchange is the main variable cost, and the reason the fee cannot be zero |
 | **Cost: the agent** | One Claude conversation per basket, plus one sandbox run. Measured per basket, both are well under a typical delivery fee |
 | **Risk held** | None for the shopper, by construction. Funds are locked before work starts and leave only by `settle` (basket proven) or `refund`. The treasury carries the gap between settle and the store's card charge |
