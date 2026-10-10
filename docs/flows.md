@@ -347,7 +347,7 @@ deadline. A server-side sweeper is the fix and is not built.
 ## 5. Funding a wallet: the devnet faucet
 
 Our USDC is our own devnet mint
-([`9rYNCiaa…tAtdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet),
+([`BZ6CHGyR…MELG85`](https://solscan.io/account/BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85?cluster=devnet),
 6 decimals), and the resolver is its mint authority, so the faucet is one
 resolver-signed transaction:
 
@@ -420,7 +420,7 @@ another wallet. Nothing server-side is involved.
 ## 8. The escrow program, in one screen
 
 `anchor/programs/changuito_escrow/src/lib.rs`, Anchor 0.32, deployed at
-[`9A2PXJaf…eXB2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet).
+[`BFa1gZL9…fXvLz9d`](https://solscan.io/account/BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d?cluster=devnet).
 The full account layout and the client are in [solana.md](solana.md).
 
 ```

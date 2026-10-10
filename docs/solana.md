@@ -9,13 +9,13 @@ Explorer links use Solscan with `?cluster=devnet`.
 
 | What | Address |
 |---|---|
-| Program `changuito_escrow` (Anchor 0.32) | [`9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet) |
-| Config PDA `["config"]` | [`BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ`](https://solscan.io/account/BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ?cluster=devnet) |
-| Mock USDC mint (6 decimals, authority = resolver) | [`9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet) |
-| Resolver (settles, refunds, mints faucet USDC, pays `open` fees) | [`AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5`](https://solscan.io/account/AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5?cluster=devnet) |
-| Treasury (owner) | [`EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS`](https://solscan.io/account/EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS?cluster=devnet) |
-| Treasury USDC token account | [`HVsDJbwmsa2oTUpddQMSSUzKF6Z4PvQRU96d7n95owxa`](https://solscan.io/account/HVsDJbwmsa2oTUpddQMSSUzKF6Z4PvQRU96d7n95owxa?cluster=devnet) |
-| Program upgrade authority (deployer) | [`2AF3x8xhFfGaLHf5CPX7YZyS5aywQkNfu51gV1Sjt15k`](https://solscan.io/account/2AF3x8xhFfGaLHf5CPX7YZyS5aywQkNfu51gV1Sjt15k?cluster=devnet) |
+| Program `changuito_escrow` (Anchor 0.32) | [`BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d`](https://solscan.io/account/BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d?cluster=devnet) |
+| Config PDA `["config"]` | [`BCcorb5CVL86uDQQT4fBusAcobXugFfTTM6ypL4bDBPh`](https://solscan.io/account/BCcorb5CVL86uDQQT4fBusAcobXugFfTTM6ypL4bDBPh?cluster=devnet) |
+| Mock USDC mint (6 decimals, authority = resolver) | [`BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85`](https://solscan.io/account/BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85?cluster=devnet) |
+| Resolver (settles, refunds, mints faucet USDC, pays `open` fees) | [`5zeMdzZCXkCHbTwvoxtEHRHCP5fe7MLc4fHgG54ENhUD`](https://solscan.io/account/5zeMdzZCXkCHbTwvoxtEHRHCP5fe7MLc4fHgG54ENhUD?cluster=devnet) |
+| Treasury (owner) | [`9TNtBk4RL2dmYdffqfudhLGc1DEtnHc8nmw7yWcD2ctc`](https://solscan.io/account/9TNtBk4RL2dmYdffqfudhLGc1DEtnHc8nmw7yWcD2ctc?cluster=devnet) |
+| Treasury USDC token account | [`6u1v9QbWXDA3WaU4j2c26sV9DomG7qRimNKch7VGnqcV`](https://solscan.io/account/6u1v9QbWXDA3WaU4j2c26sV9DomG7qRimNKch7VGnqcV?cluster=devnet) |
+| Program upgrade authority (deployer) | [`57NLdwkHrqRrmydcVzWLQup4D5yRuC6W4MHqYeuYUgFi`](https://solscan.io/account/57NLdwkHrqRrmydcVzWLQup4D5yRuC6W4MHqYeuYUgFi?cluster=devnet) |
 
 Source of truth: `deployments.json` at the repo root, turned into
 `apps/web/lib/deployments.ts` by `scripts/write-deployments-module.mjs`.
@@ -231,8 +231,9 @@ SKIP_BUILD=1 scripts/solana-deploy.sh    # reuse anchor/target/deploy/*.so
 
 What it runs:
 
-1. `cargo build-sbf --tools-version v1.52` and `anchor idl build` (older
-   platform-tools cannot parse edition-2024 crates in the dependency tree).
+1. `cargo build-sbf --tools-version v1.56 --arch v3` and `anchor idl build`
+   (SBPF v3 because Agave 4.3+ refuses v0; older platform-tools cannot parse
+   the edition-2024 crates in the dependency tree).
 2. `solana program deploy` with `program.json` as the program id and
    `deployer.json` as payer and upgrade authority.
 3. `scripts/solana-init.mts`: `initialize(resolver, treasury)` if Config does
@@ -261,13 +262,13 @@ Deployment (from `deployments.json`):
 
 | Step | Transaction |
 |---|---|
-| Program deploy | [`3f3caazB…4SQ91YjmC`](https://solscan.io/tx/3f3caazBpPsDmcvQnKzGgdM7H1GPMeNiZoD6Z8yq7H8JX8tdrEmfXMA2gBuDSNBbRqCsq51KF6VtLCG4SQ91YjmC?cluster=devnet) |
-| `initialize` | [`3mWgS3g9…foWUu7Xj2`](https://solscan.io/tx/3mWgS3g9iCju1J9p8s6563KRQfG3juVCX2mwFqURJB2oYVWzvAimMgPqxjMNsJUFY64unGUtBcwsyzsfoWUu7Xj2?cluster=devnet) |
-| Smoke: fund deployer | [`2bahH3CV…Eq6Cjux`](https://solscan.io/tx/2bahH3CVovSMEKLELkjJUYq1JTtnJkLcxUGSHVc4UaiSDPj5MT2cB1SCVJAX4uJfoP4z5HM2rUDryCmmEqa6Cjux?cluster=devnet) |
-| Smoke: `open` (settle path) | [`5Hw7m8aq…uJJFNPr`](https://solscan.io/tx/5Hw7m8aq638nYbY9MY5C8bDs4XC4AjqNAESgEVpErLMcYvkMkdmrghHUtQkR2k9Ex7XfWFzVnPsyHztzmuJJFNPr?cluster=devnet) |
-| Smoke: `settle` | [`z5Qq1C15…CFjwew8`](https://solscan.io/tx/z5Qq1C15CTsqC94R3mGrgEzqr29LNstTmFm4mEr3nVb3gY2Yna7LhL3mG2EoPuosiun9NLAKG77E3tSPCFjwew8?cluster=devnet) |
-| Smoke: `open` (refund path) | [`C7VcfqHY…VTgomNz`](https://solscan.io/tx/C7VcfqHYVTNAkjP8T8isTWcfVhfewHgU4U8ZZQXEDnoMtLvLoiDrVf8Te4UwKS5zg7D45PdKbfmvrK8mVTgomNz?cluster=devnet) |
-| Smoke: `refund` | [`5GtMF7Jv…HjFQA47e`](https://solscan.io/tx/5GtMF7JvPdcog9d7oebhdwtgfw45yPY8Nh6mS6TE5pdXmBXcYad7saFPHsxriqUry4fYLAWqqXboKAM5HjFQA47e?cluster=devnet) |
+| Program deploy | [`4rNtLVRC…73PoS6ixz`](https://solscan.io/tx/4rNtLVRC8iQzHcnXVweNUkJ8yQYV4dBvnpw1rVKJQDFHNJRosMnWW3VuCE1FpFRuDjiVmQXNK7ycZvt73PoS6ixz?cluster=devnet) |
+| `initialize` | [`3ZQa77Kf…nWvyCNG6E`](https://solscan.io/tx/3ZQa77Kf83ddFtxG4oxxbWSAYCELEytnvwqzZVQkCxEuuixj45BAkjccZyfrnm6gEYsmj4iaee61ErXnWvyCNG6E?cluster=devnet) |
+| Smoke: fund deployer | [`7afnqiFK…zXtSkfEhn`](https://solscan.io/tx/7afnqiFKgQ3CgdwySV8qM7cqoxAJNbxPw7rwj2fx9jTZEtU11Fg7hSgUAaFEtzVQTrRG4P37Vx2BxqMTiSfkEhn?cluster=devnet) |
+| Smoke: `open` (settle path) | [`5ww3W1FQ…UkdotBE`](https://solscan.io/tx/5ww3W1FQGjnspyzpcjFSEJjjMzwX9ZWXsmp7Hm4BjEpS7VSwSD1rgqzwaqU7o6q4mzeTPjAHmWaQFJzXtUkdotBE?cluster=devnet) |
+| Smoke: `settle` | [`2Bmuhoev…bcr5o3B`](https://solscan.io/tx/2Bmuhoev9j1HMFgi7RZ8mvsyvGt89CKwCNpvmc38NQnZhi2gsUPxYmjehgBtKrVSNZqxcfGuDn4CgH7BMbcr5o3B?cluster=devnet) |
+| Smoke: `open` (refund path) | [`4v7AZfCM…fcu4LFM`](https://solscan.io/tx/4v7AZfCMsqX3pF169j8L6xcThNHGjYRARZ3FHCRimtNCVu2evNaaBkWNSK4fKjoMCtb5CNTLyg9ZQoXTDfcu4LFM?cluster=devnet) |
+| Smoke: `refund` | [`3yvsvRXi…fsApYYpW`](https://solscan.io/tx/3yvsvRXiV5Zue4rLPWhrBUpZMRyjJc2mAKsDHyzFLvTn7SxpV4ExqKh6rNMiT4Z9JusbzHsZB9ZFzTM9fsApYYpW?cluster=devnet) |
 
 Route-level e2e (`scripts/devnet-e2e.mts` against `next dev` + mock sandbox,
 2026-10-04):

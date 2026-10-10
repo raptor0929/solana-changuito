@@ -19,8 +19,8 @@ read one section. It states what is simulated, by us, before you find it.
 | **Built by** | [SimonethG](https://www.linkedin.com/in/simonethg/) and [Fabio](https://www.linkedin.com/in/fabio-laura-yavi/), in Argentina |
 | **Cluster** | Solana **devnet** only. There is no mainnet configuration in the code |
 | **What is on-chain** | an Anchor escrow: the shopper locks USDC, the backend resolver settles it to a treasury or refunds it. Every order is an account you can read |
-| **Program** | `changuito_escrow` [`9A2PXJaf…B2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet) — Anchor 0.32, source in [`anchor/programs/changuito_escrow`](../anchor/programs/changuito_escrow) |
-| **USDC** | our own devnet mint, 6 decimals, [`9rYNCiaa…tAtdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet). The resolver is its mint authority; the in-app faucet hands out 50 at a time |
+| **Program** | `changuito_escrow` [`BFa1gZL9…vLz9d`](https://solscan.io/account/BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d?cluster=devnet) — Anchor 0.32, source in [`anchor/programs/changuito_escrow`](../anchor/programs/changuito_escrow) |
+| **USDC** | our own devnet mint, 6 decimals, [`BZ6CHGyR…MELG85`](https://solscan.io/account/BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85?cluster=devnet). The resolver is its mint authority; the in-app faucet hands out 50 at a time |
 | **Wallet** | Privy (`@privy-io/react-auth` 3.47.0): email or Google login creates an embedded Solana wallet that only signs. The server's resolver key pays the `open` fee and co-signs only the exact transaction it built, so a shopper needs no prior wallet and no SOL for fees |
 | **Pitch video** | sources in [`creatives/`](../creatives) (Remotion). No hosted link in this repo — `npm run render` in any of those folders produces the mp4 |
 
@@ -52,8 +52,8 @@ outcome is a devnet transaction the shopper gets a Solscan link for.
 
 | The claim | Where to check it |
 |---|---|
-| The escrow is deployed and initialized on devnet | deploy [`3f3caazB…`](https://solscan.io/tx/3f3caazBpPsDmcvQnKzGgdM7H1GPMeNiZoD6Z8yq7H8JX8tdrEmfXMA2gBuDSNBbRqCsq51KF6VtLCG4SQ91YjmC?cluster=devnet) · initialize [`3mWgS3g9…`](https://solscan.io/tx/3mWgS3g9iCju1J9p8s6563KRQfG3juVCX2mwFqURJB2oYVWzvAimMgPqxjMNsJUFY64unGUtBcwsyzsfoWUu7Xj2?cluster=devnet) · Config PDA [`BfMWiygm…`](https://solscan.io/account/BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ?cluster=devnet). Recorded in [`apps/web/lib/deployments.ts`](../apps/web/lib/deployments.ts) (`EVIDENCE`) |
-| Settle and refund both work on the deployed program | smoke settle [`z5Qq1C15…`](https://solscan.io/tx/z5Qq1C15CTsqC94R3mGrgEzqr29LNstTmFm4mEr3nVb3gY2Yna7LhL3mG2EoPuosiun9NLAKG77E3tSPCFjwew8?cluster=devnet) · smoke refund [`5GtMF7Jv…`](https://solscan.io/tx/5GtMF7JvPdcog9d7oebhdwtgfw45yPY8Nh6mS6TE5pdXmBXcYad7saFPHsxriqUry4fYLAWqqXboKAM5HjFQA47e?cluster=devnet), run by [`scripts/solana-init.mts`](../scripts/solana-init.mts) after deploy |
+| The escrow is deployed and initialized on devnet | deploy [`4rNtLVRC…`](https://solscan.io/tx/4rNtLVRC8iQzHcnXVweNUkJ8yQYV4dBvnpw1rVKJQDFHNJRosMnWW3VuCE1FpFRuDjiVmQXNK7ycZvt73PoS6ixz?cluster=devnet) · initialize [`3ZQa77Kf…`](https://solscan.io/tx/3ZQa77Kf83ddFtxG4oxxbWSAYCELEytnvwqzZVQkCxEuuixj45BAkjccZyfrnm6gEYsmj4iaee61ErXnWvyCNG6E?cluster=devnet) · Config PDA [`BCcorb5C…`](https://solscan.io/account/BCcorb5CVL86uDQQT4fBusAcobXugFfTTM6ypL4bDBPh?cluster=devnet). Recorded in [`apps/web/lib/deployments.ts`](../apps/web/lib/deployments.ts) (`EVIDENCE`) |
+| Settle and refund both work on the deployed program | smoke settle [`2Bmuhoev…`](https://solscan.io/tx/2Bmuhoev9j1HMFgi7RZ8mvsyvGt89CKwCNpvmc38NQnZhi2gsUPxYmjehgBtKrVSNZqxcfGuDn4CgH7BMbcr5o3B?cluster=devnet) · smoke refund [`3yvsvRXi…`](https://solscan.io/tx/3yvsvRXiV5Zue4rLPWhrBUpZMRyjJc2mAKsDHyzFLvTn7SxpV4ExqKh6rNMiT4Z9JusbzHsZB9ZFzTM9fsApYYpW?cluster=devnet), run by [`scripts/solana-init.mts`](../scripts/solana-init.mts) after deploy |
 | The app's own routes drive the full settle path | faucet [`36qKsuaG…`](https://solscan.io/tx/36qKsuaGykkY9NyrkGG4PKNArByv6fXJtf5bBNNj2sUoQ1cV7DGebdqZJnLXmkdEncZjkRoncaCFDeo6zWUzgqzL?cluster=devnet) → open [`5aShGUf3…`](https://solscan.io/tx/5aShGUf3h1cJvNuLDUNZXjpBCBEf18bHkq8GpkcnN1D4yJaumBfNJkqNacRqMkBYq7r4FvEtnrTK1ZyRAyLze35Z?cluster=devnet) → settle [`32qUpErt…`](https://solscan.io/tx/32qUpErth2AG72KvXPCNSDX5NY9ftwsaH7u6SYSpZaB3N6b6Kz8csjhAWpNckTdsEkH53HPBQk2eySDrsjGR9a4K?cluster=devnet): 5.06 USDC for a $6.150 ARS basket at 1400 ARS/USD plus 15%. Produced by [`scripts/devnet-e2e.mts`](../scripts/devnet-e2e.mts) |
 | …and the refund path | open [`2vaNKpBu…`](https://solscan.io/tx/2vaNKpBuuYbnfgT3gaZwr2gwcKbYLjgrP2dfAZBzr2PgheuXuHEDedVSkoHdhL6ZDsW88mofSZPjkyFKYvDXHbCZ?cluster=devnet) → refund [`244i1Squ…`](https://solscan.io/tx/244i1SqumYySTLBSFkEnPRN6KFEqBDWNEC9GQfPU9zEdsouRYVuwdPgtAGYMVY2BULq8KoEsPruPCqrDMyYVExKP?cluster=devnet), same script with `SANDBOX_MOCK_FAIL=1` on the server |
 | Only the resolver can move locked funds before the deadline; the buyer can reclaim after it | `settle` and `refund` account constraints in [`lib.rs`](../anchor/programs/changuito_escrow/src/lib.rs) (`NotAuthorized`) |
@@ -114,8 +114,8 @@ being told.
 directly, any Solana CLI works:
 
 ```bash
-solana account BfMWiygm3XRab8xbJC355rxRZ4DFYqR2vyi1gjSjWyTQ --url devnet   # Config: resolver, treasury, mint
-solana program show 9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9 --url devnet
+solana account BCcorb5CVL86uDQQT4fBusAcobXugFfTTM6ypL4bDBPh --url devnet   # Config: resolver, treasury, mint
+solana program show BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d --url devnet
 ```
 
 **Run both checkout paths in five minutes.** Needs Node 22.12+, and the

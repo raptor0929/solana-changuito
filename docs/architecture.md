@@ -29,7 +29,7 @@ What this demo does **not** do, stated up front:
   level. A settle means "the agent proved it could carry this basket to Día's
   checkout". The shopper finishes the purchase at Día through their own cart
   link.
-- **Devnet only, mock USDC.** The mint is ours (`9rYNCi…tdMM`), minted by the
+- **Devnet only, mock USDC.** The mint is ours (`BZ6CHG…LG85`), minted by the
   in-app faucet.
 - **The 15% FX buffer goes to the treasury** with the rest on settle. It exists
   because envío is only known at checkout, after the money is locked; returning
@@ -198,8 +198,8 @@ shopper. Everything else is in [`../CLAUDE.md`](../CLAUDE.md).
 | Key | Held by | Can | Cannot |
 |---|---|---|---|
 | Buyer wallet | the shopper, via Privy's embedded wallet | sign `open` (lock own USDC); `refund` own order **after** its deadline | settle; refund before the deadline; touch another buyer's order |
-| Resolver (`AgTnHC…yqQ5`) | the Next.js server (`SOLANA_RESOLVER_SECRET`) | `settle` an open order **to the configured treasury**; `refund` an open order **to the buyer** at any time; mint mock USDC (it is the mint authority); pay the fee for `open`, co-signing only the message the server built for that quote | send escrowed USDC anywhere else; settle against a different basket than was opened; close an order twice |
-| Program upgrade authority (`2AF3x8…t15k`, the deployer) | the developer's machine | redeploy the program (standard upgradeable loader) | — this is the one key that could change the rules; it is not frozen on devnet |
+| Resolver (`5zeMdz…NhUD`) | the Next.js server (`SOLANA_RESOLVER_SECRET`) | `settle` an open order **to the configured treasury**; `refund` an open order **to the buyer** at any time; mint mock USDC (it is the mint authority); pay the fee for `open`, co-signing only the message the server built for that quote | send escrowed USDC anywhere else; settle against a different basket than was opened; close an order twice |
+| Program upgrade authority (`57NLdw…UgFi`, the deployer) | the developer's machine | redeploy the program (standard upgradeable loader) | — this is the one key that could change the rules; it is not frozen on devnet |
 | `PRIVY_APP_SECRET` | the Next.js server | look up a verified user's linked wallets (Privy REST, basic auth) | sign anything on chain; the token itself is verified against Privy's public JWKS |
 | `SANDBOX_TOKEN` | web server + sandbox | start and read sandbox jobs | move any money |
 | Día account credentials | sandbox env only | log in to one Día account | reach Jev (redacted) or the web app |

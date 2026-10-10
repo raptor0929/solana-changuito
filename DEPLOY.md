@@ -160,7 +160,7 @@ once, something is buffering the SSE response — the route sets
 Then walk it once: build a basket, press *Pagar*, sign in with an email, press
 *Cargar 50 USDC de prueba*, lock, and wait for *¡Compra completada!*. Open the
 *Bloqueo* and *Liberación* links: both should be devnet transactions against
-program `9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9`.
+program `BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d`.
 
 Without a browser, `scripts/devnet-e2e.mts` drives the same routes against
 any base URL, but it mints its own session cookie, so it only works where it
@@ -220,17 +220,20 @@ Only needed to deploy your own copy. The committed one is live:
 
 | | |
 |---|---|
-| Program | [`9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9`](https://solscan.io/account/9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9?cluster=devnet) |
-| USDC mint | [`9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM`](https://solscan.io/account/9rYNCiaaKQ5rT1QR8Ar6FJVUr7gnwZy3RYAT6MtAtdMM?cluster=devnet) |
-| Resolver | [`AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5`](https://solscan.io/account/AgTnHC9dmyuzjwp3oCRzaYrZbgeXD4tC2uSXmKhiyqQ5?cluster=devnet) |
-| Treasury | [`EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS`](https://solscan.io/account/EV5c3mjEHBtTU6JmX31eLsfKX5zPgMVDEiKDhqjApZPS?cluster=devnet) |
+| Program | [`BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d`](https://solscan.io/account/BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d?cluster=devnet) |
+| USDC mint | [`BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85`](https://solscan.io/account/BZ6CHGyRnuuGRxDmd1bCFdeUTCJGcGcWtUct1NMELG85?cluster=devnet) |
+| Resolver | [`5zeMdzZCXkCHbTwvoxtEHRHCP5fe7MLc4fHgG54ENhUD`](https://solscan.io/account/5zeMdzZCXkCHbTwvoxtEHRHCP5fe7MLc4fHgG54ENhUD?cluster=devnet) |
+| Treasury | [`9TNtBk4RL2dmYdffqfudhLGc1DEtnHc8nmw7yWcD2ctc`](https://solscan.io/account/9TNtBk4RL2dmYdffqfudhLGc1DEtnHc8nmw7yWcD2ctc?cluster=devnet) |
 
 ### 3.1 Toolchain
 
 - Rust and the Solana CLI (Agave), with `cargo build-sbf`.
-- Platform tools **v1.52** — `cargo build-sbf --tools-version v1.52`. Older
-  ones cannot parse the edition-2024 crates in the dependency tree.
-- Anchor CLI 0.32, for `anchor idl build`.
+- Platform tools **v1.56** and SBPF **v3** — `cargo build-sbf --tools-version
+  v1.56 --arch v3`. Agave 4.3+ blocks v0 deployments (SIMD-500), v1.52 cannot
+  emit v3, and anything older cannot parse the edition-2024 crates in the
+  dependency tree.
+- Anchor CLI 1.2, for `anchor idl build`. The program's `anchor-lang` and
+  `anchor-spl` crates stay on 0.32; the CLI only writes the IDL.
 - Node 22.12+.
 
 ### 3.2 Keys
@@ -283,7 +286,7 @@ SKIP_BUILD=1 ./scripts/solana-deploy.sh   # redeploy the .so already built
 
 The script:
 
-1. builds with `cargo build-sbf --tools-version v1.52` and writes the IDL with
+1. builds with `cargo build-sbf --tools-version v1.56 --arch v3` and writes the IDL with
    `anchor idl build` (skipped with `SKIP_BUILD=1`);
 2. `solana program deploy` with `program.json` as the id and `deployer.json`
    paying;
