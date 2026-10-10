@@ -36,6 +36,36 @@ def _configure(cdp_http_url: str) -> None:
     os.environ.setdefault("BH_TAB_MARKER", "0")  # no cosmetic emoji in the store's tab title
 
 
+def _openai_text_model() -> None:
+    """Let TEXT_MODEL_BASE_URL be OpenAI itself, so an existing OpenAI key works.
+
+    Ultrafast's text helper always sends a `reasoning` object (OpenRouter's shape) and
+    `max_tokens`. OpenAI's chat completions take neither: an unknown top-level field is
+    rejected, and its reasoning models want `max_completion_tokens`. For requests to
+    api.openai.com only, those two are rewritten; `TEXT_MODEL_REASONING_EFFORT` becomes
+    `reasoning_effort` when set (leave it unset for gpt-4.1 / gpt-4o models). Jev's calls go
+    to TypeSafe and are untouched.
+    """
+    from jev_ultrafast import model
+
+    if getattr(model.post_json, "_openai_adapted", False):
+        return
+    original = model.post_json
+
+    def post_json(url, key, body):
+        if url.startswith("https://api.openai.com/") and url.endswith("/chat/completions"):
+            body = {k: v for k, v in body.items() if k not in {"reasoning", "thinking"}}
+            if "max_tokens" in body:
+                body["max_completion_tokens"] = body.pop("max_tokens")
+            effort = os.environ.get("TEXT_MODEL_REASONING_EFFORT", "").strip()
+            if effort:
+                body["reasoning_effort"] = effort
+        return original(url, key, body)
+
+    post_json._openai_adapted = True
+    model.post_json = post_json
+
+
 def _guarded_browser_class():
     from jev_ultrafast.browser import Browser
 
@@ -65,6 +95,7 @@ def run_checkout(goal: str, start_url: str, cdp_http_url: str, *, max_seconds: f
     from jev_ultrafast import agent as uf
 
     uf.Browser = _guarded_browser_class()
+    _openai_text_model()
     started = time.monotonic()
     agent = uf.Agent(start_url, goal)
     steps = 0
