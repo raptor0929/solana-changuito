@@ -32,7 +32,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, CloseAccount, Mint, Token, TokenAccount, Transfer};
 
-declare_id!("9A2PXJafYxym4i8ah1QFQZngqz2j7rQh8xQX2eXB2wC9");
+declare_id!("BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d");
 
 /// Bounds on `timeout_secs`, so a caller cannot set a deadline that has already
 /// passed (instant self-refund) or one so far out the money is effectively gone.

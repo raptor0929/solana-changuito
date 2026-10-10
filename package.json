@@ -23,7 +23,7 @@
     "db:status": "node scripts/db.mjs status",
     "db:invariants": "node scripts/db-invariants.mjs",
     "db:archive": "node --experimental-strip-types scripts/db-chat-archive.mts",
-    "program:build": "cd anchor/programs/changuito_escrow && cargo build-sbf --tools-version v1.52",
+    "program:build": "cd anchor/programs/changuito_escrow && cargo build-sbf --tools-version v1.56 --arch v3",
     "deploy:devnet": "./scripts/solana-deploy.sh",
     "devnet:init": "node --experimental-strip-types scripts/solana-init.mts --no-smoke"
   },

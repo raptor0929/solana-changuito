@@ -14,9 +14,14 @@ KEYS="$HOME/.config/solana/changuito"
 URL="${SOLANA_RPC_URL:-https://api.devnet.solana.com}"
 
 if [[ -z "${SKIP_BUILD:-}" ]]; then
-  # platform-tools v1.52: older ones cannot parse edition-2024 crates in the tree.
-  (cd anchor/programs/changuito_escrow && cargo build-sbf --tools-version v1.52)
-  (cd anchor && anchor idl build -o target/idl/changuito_escrow.json)
+  # SBPF v3, platform-tools v1.56: Agave 4.3+ refuses v0 deployments, and
+  # v1.52 cannot emit v3. Older tools also cannot parse the edition-2024
+  # crates in the tree, so there is no going back from here.
+  (cd anchor/programs/changuito_escrow && cargo build-sbf --tools-version v1.56 --arch v3)
+  # target/idl does not exist on a clean checkout, and `idl build -o` will not
+  # create it: it fails with a bare "No such file or directory".
+  mkdir -p anchor/target/idl
+  (cd anchor && NO_DNA=1 anchor idl build -o target/idl/changuito_escrow.json)
 fi
 
 solana program deploy anchor/target/deploy/changuito_escrow.so \
