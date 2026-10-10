@@ -15,9 +15,9 @@ it in USDC on Solana devnet. Five pieces, each with one job:
 3. **An escrow program** (`anchor/programs/changuito_escrow`, Anchor 0.32) that
    holds the shopper's USDC between "I approved this basket" and "the basket
    was carried through the store's checkout". See [solana.md](solana.md).
-4. **A checkout sandbox** (`services/sandbox`, Python, on Railway): Jev +
-   Playwright logging into one Día account, filling the cart and walking
-   checkout up to the card form. See [sandbox.md](sandbox.md).
+4. **A checkout sandbox** (`services/sandbox`, Python, on Railway): Jev
+   logging into one Día account, the store's API filling the cart by SKU, and
+   Jev Ultrafast walking checkout up to the card form. See [sandbox.md](sandbox.md).
 5. **A resolver** — a server-held key inside the Next.js app that settles or
    refunds the escrow on the sandbox's result, and mints devnet USDC for the
    faucet.
@@ -63,7 +63,7 @@ flowchart TB
         direction TB
         VTEX["VTEX supermarkets<br/><i>catalogue · cart · cart link</i>"]
         SOL["Solana devnet<br/><i>changuito_escrow · mock USDC mint</i>"]
-        SBX["Sandbox on Railway<br/><i>FastAPI · Jev · Playwright · one Día account</i>"]
+        SBX["Sandbox on Railway<br/><i>FastAPI · Jev · Jev Ultrafast · one Día account</i>"]
         DIA["Día checkout"]
         PG[("Supabase Postgres<br/><i>kv: turns 1h · checkouts 24h · quotas</i><br/>chat archive")]
     end
@@ -320,7 +320,7 @@ changuito/
 │       ├── solana.ts        RPC, send + confirm, Solscan links, units
 │       ├── order.ts         canonical basket + receipt text and hashes
 │       └── deployments.ts   generated from deployments.json
-├── services/sandbox/        Jev + Playwright checkout worker (FastAPI)
+├── services/sandbox/        Jev + Jev Ultrafast checkout worker (FastAPI)
 ├── packages/mcp/            the vendored supermarket MCP server
 ├── scripts/                 solana-deploy.sh, solana-init.mts,
 │                              write-deployments-module.mjs, devnet-e2e.mts

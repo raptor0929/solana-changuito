@@ -164,7 +164,7 @@ flowchart TB
     end
 
     subgraph S["RAILWAY"]
-        SB["services/sandbox<br/><i>FastAPI + Playwright + Jev<br/>one job at a time</i>"]
+        SB["services/sandbox<br/><i>FastAPI + Jev + Jev Ultrafast<br/>one job at a time</i>"]
     end
 
     subgraph X["OUTSIDE"]
@@ -193,7 +193,7 @@ flowchart TB
 - **The sandbox** holds the store account's credentials and has no key at all. It reports a phase, and the server decides what that means.
 - **Before starting a job**, `/api/checkout/start` reads the order PDA from chain. Buyer, status, amount and basket hash must all match the quote. The browser's claim that it paid is never trusted.
 
-**The sandbox** ([`services/sandbox`](services/sandbox), [docs/sandbox.md](docs/sandbox.md)) is a Playwright browser driven by *Jev*. Jev is a model that answers typed questions (pick one of these elements, yes/no, a score) and never writes free text. The harness does the clicking.
+**The sandbox** ([`services/sandbox`](services/sandbox), [docs/sandbox.md](docs/sandbox.md)) is a Chromium driven by *Jev*. Jev is a model that answers typed questions (pick one of these elements, yes/no, a score) and never writes free text. It picks during login (the sandbox types the secrets) and drives checkout through Jev Ultrafast; the cart is filled through the store's API by SKU, with no model.
 
 - It logs in, empties the cart, searches each line, adds it, and walks the checkout until it reaches the card form.
 - It is never offered a "comprar / confirmar / pagar" choice.
@@ -334,7 +334,7 @@ tests are treated as a fixed point.
 apps/web/                 the shopper: chat, checkout, API routes
 apps/landing/             marketing site
 anchor/programs/          changuito_escrow: open / settle / refund
-services/sandbox/         Jev + Playwright checkout agent, FastAPI job server (Railway)
+services/sandbox/         Jev + Jev Ultrafast checkout agent, FastAPI job server (Railway)
 packages/mcp/             supermarket MCP server for four VTEX chains (prior work)
 packages/trust/           footer trust copy shared by both apps
 scripts/                  solana-deploy.sh, solana-init.mts, devnet-e2e.mts

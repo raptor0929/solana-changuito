@@ -175,7 +175,7 @@ against `npm run dev` instead (see [docs/judges.md](docs/judges.md#5-verify-it-y
 
 ## Part 2 — the sandbox on Railway
 
-`services/sandbox` is a FastAPI service around a Playwright harness. It holds
+`services/sandbox` is a FastAPI service around a Chromium driven over CDP. It holds
 one operator Día account and runs one job at a time. Details in
 [docs/sandbox.md](docs/sandbox.md).
 
@@ -184,7 +184,7 @@ one operator Día account and runs one job at a time. Details in
 1. **Railway → New Project → Deploy from GitHub repo**, this repository.
 2. In the service's **Settings → Source**, set **Root directory** to
    `services/sandbox`. Railway then picks up `railway.json`, which builds the
-   `Dockerfile` (`mcr.microsoft.com/playwright/python:v1.63.0-noble` plus `uv`),
+   `Dockerfile` (`python:3.12-slim-bookworm`, Debian's `chromium`, plus `uv`),
    health-checks `/health`, restarts on failure, and runs **one replica**.
 3. Keep it at one replica. The Día account's cart is bound to its session and
    jobs are held in memory; two replicas would share an account and split the
@@ -196,6 +196,7 @@ one operator Día account and runs one job at a time. Details in
 |---|---|
 | `SANDBOX_TOKEN` | `openssl rand -hex 32`. Unset, `/jobs` answers 503 |
 | `TYPESAFE_API_KEY` | TypeSafe API key, for Jev |
+| `TEXT_MODEL_API_KEY` | Jev Ultrafast's text model (`TEXT_MODEL_BASE_URL`, `TEXT_MODEL` optional), used only when checkout needs a field typed; it sees redacted page text |
 | `DIA_ARG_EMAIL`, `DIA_ARG_PWD`, `DIA_ARG_DNI` | the operator's Día account. Typed from the environment and redacted from everything the model sees |
 | `DIA_ARG_POSTCODE` | the delivery postcode checkout asks for |
 | `PORT` | leave it; Railway sets it and the image defaults to 8080 |

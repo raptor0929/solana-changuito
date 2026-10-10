@@ -51,19 +51,23 @@ the harness asks it typed questions and executes the answer.
 | `phase_done` | Noul | whether the current phase looks finished |
 | `product_match` | Score (shop phase) | how well visible products match the item |
 
-**Playwright** runs Chromium, builds the list of visible controls, and does
-the clicking. The harness — not the model — decides when a phase is done, from
-Día's own APIs:
+Jev is used only where a page has to be read. Each phase uses the cheapest
+driver that is still trustworthy, and the harness — not a model — decides when
+a phase is done, from Día's own APIs:
 
-| Phase | Done when |
-|---|---|
-| `login` | `/api/sessions` reports the user authenticated |
-| `empty_cart` | the `orderForm` has no items |
-| `shop` | each requested item raised the `orderForm` item count |
-| `checkout` | the URL reaches `#/payment` → reported as phase `payment` |
+| Phase | Driver | Done when |
+|---|---|---|
+| `login` | Jev picks the next field or button; the sandbox types the secrets | `/api/sessions` reports the user authenticated |
+| `empty_cart` | the `orderForm` API, no model | the `orderForm` has no items |
+| `shop` | the `orderForm` API, **by SKU and quantity**, no model. A line without a SKU is searched by name with Jev Ultrafast | the `orderForm` holds the lines |
+| `checkout` | [Jev Ultrafast](https://github.com/browser-use/jev-ultrafast) in its own tab | the URL reaches `#/payment` → reported as phase `payment` |
 
-A full upstream run (login + 4 items + checkout) took ~33 decisions and about
-4 minutes of wall time.
+There is no Playwright. `cdp.py` launches Debian's Chromium with remote
+debugging on loopback and speaks CDP for login and the cart APIs; Ultrafast
+connects to the same port through Browser Harness. The previous design
+(Playwright, Jev for every phase) took 208.9 s for a 4-item basket, of which
+12.5 s was Jev and most of the rest fixed waits after each click; every job now
+reports `wall_s` and per-phase `timings`.
 
 ## Job API
 
@@ -163,13 +167,16 @@ From [`UPSTREAM.md`](../services/sandbox/UPSTREAM.md), enforced in `sandbox.py`:
 - **No order is placed.** The run stops on the payment step. Controls matching
   "comprar ahora / confirmar compra / realizar pedido / pagar ahora / repetir
   pedido" are never offered to Jev. `/transaction`, `/payments`,
-  `gatewayCallback` and `orderPlaced` requests are aborted at the network level
-  and counted (`orders_blocked`).
+  `gatewayCallback` and `orderPlaced` requests are failed at the network level
+  and counted (`orders_blocked`), in every tab and popup the browser opens:
+  `cdp.py` attaches to each target before its first request. `selfcheck.py`
+  proves it against a real Chromium, no credentials needed.
 - **Credentials never reach the model.** Jev sees options like "type the
   account password into its empty field"; the harness reads the value from the
   environment and types it. DNI, email and postcode are redacted from all page
-  text sent to Jev and from the step log. The Playwright trace starts only
-  after login.
+  text sent to Jev and from the step log. Ultrafast never logs in: it would
+  type the password with its text model and send it back to Jev in its action
+  history. Everything it observes is redacted the same way.
 - **No replacements.** Options that accept a substitute product are filtered;
   only "no reemplazar" reaches Jev.
 - **No account actions.** Logout, registration, password recovery and account
@@ -235,9 +242,9 @@ reconciles them after the handoff.
 ## Deploy on Railway
 
 The service builds from `services/sandbox/Dockerfile`:
-`mcr.microsoft.com/playwright/python:v1.63.0-noble` (Chromium system
-dependencies included) + `uv`, `uv sync --frozen --no-dev`, `playwright install
-chromium`, then `uvicorn server:app` on `$PORT` (default 8080).
+`python:3.12-slim-bookworm` + Debian's `chromium` + `uv`, `uv sync --frozen
+--no-dev`, then `uvicorn server:app` on `$PORT` (default 8080). The image sets
+`BH_TELEMETRY=0`, turning off Browser Harness's opt-out telemetry.
 `railway.json`: Dockerfile builder, healthcheck `/health`, restart on failure,
 1 replica.
 
@@ -247,6 +254,7 @@ chromium`, then `uvicorn server:app` on `$PORT` (default 8080).
    | Variable | Purpose |
    |---|---|
    | `TYPESAFE_API_KEY` | Jev (TypeSafe) |
+   | `TEXT_MODEL_API_KEY` (+ `TEXT_MODEL_BASE_URL`, `TEXT_MODEL`) | Ultrafast's text model, used only when checkout needs a field typed; it sees redacted page text |
    | `DIA_ARG_DNI`, `DIA_ARG_EMAIL`, `DIA_ARG_PWD` | the Día account the sandbox logs into |
    | `DIA_ARG_POSTCODE` | delivery postcode typed at checkout |
    | `SANDBOX_TOKEN` | shared bearer token with the web app (long random string) |

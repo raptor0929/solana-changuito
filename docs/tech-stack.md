@@ -89,10 +89,11 @@ credited (`UPSTREAM.md`). Details in [sandbox.md](sandbox.md).
 
 | | Version | Notes |
 |---|---|---|
-| **`playwright`** (Python) | ≥ 1.63.0 | drives Chromium on Día's real site |
+| **`jev-ultrafast`** | git, pinned commit | drives checkout on Día's real site, in its own tab, through Browser Harness (telemetry off) |
+| **`websockets`** | ≥ 13 | `cdp.py`: the sandbox's own CDP client for login, the cart APIs and the network guard |
 | **`typesafe-sdk`** | ≥ 0.7.2 | Jev, TypeSafe's System One model. It answers typed questions (Choice / Noul / Score) about the page and never generates text; the harness executes the choice |
 | **FastAPI + uvicorn** | ≥ 0.115, ≥ 0.30 | `POST /jobs`, `GET /jobs/{id}`, `GET /health`, Bearer `SANDBOX_TOKEN` |
-| **Image** | `mcr.microsoft.com/playwright/python:v1.63.0-noble` | Chromium's system libraries come with it |
+| **Image** | `python:3.12-slim-bookworm` + Debian `chromium` | no Playwright; Chromium runs with remote debugging on loopback |
 | **Host** | Railway, one replica | one job at a time: one Día account, one session-bound cart |
 
 ## Data

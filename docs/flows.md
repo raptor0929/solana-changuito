@@ -241,8 +241,9 @@ refunds.
 
 `services/sandbox` ([sandbox.md](sandbox.md)) is a Python worker: Jev
 (TypeSafe's System One model, which answers typed questions and never
-generates text) picks among the visible controls, and Playwright executes the
-choice on Día's real site, in four phases. The dialog shows each one:
+generates text) picks among the visible controls during login and, through
+Jev Ultrafast, during checkout; the cart in between is filled through the
+store's API by SKU. Four phases. The dialog shows each one:
 
 | Phase | Shown as |
 |---|---|
