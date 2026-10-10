@@ -408,13 +408,23 @@ by `.github/workflows/sync.yml`:
   this merges, cherry-pick it into the sibling repo and open a PR there.
   `chain-only` means: this touches shared paths but stays here on purpose —
   the sibling already has it, or it must not have it.
-- **A `shared` PR becomes a `sync: …` PR in the sibling**, on a
-  `sync/<repo>-<pr>` branch, with the original author kept on the commit and
-  the source hash in its message (`-x`). Review it there like any other PR,
-  and merge it the same day: an unmerged sync PR is exactly the drift the
-  labels exist to make visible.
-- **A conflict opens an issue in the sibling, not a broken branch.** The
-  issue holds the exact commands; whoever owns that repo resolves it.
+- **A `shared` PR becomes an ordinary PR in the sibling**, on a
+  `sync/<source branch>` branch, labelled `chain-only`, with the source PR's
+  title and body and the original author on the commit. Review it there like
+  any other PR, and merge it the same day: an unmerged sync PR is exactly the
+  drift the labels exist to make visible.
+- **Nothing in the sibling names where a change came from** — not the
+  branch, title, body, commit or issue — because each repo is judged on its
+  own. The link is recorded on the source PR instead, as a comment with the
+  sibling PR number inside a code span. Keep it in one: a plain `org/repo#N`
+  or URL anywhere public puts a "mentioned this" entry on the sibling PR's
+  timeline, which is the link this avoids. Write shared PR descriptions and
+  commit messages without naming either chain; when one does, the workflow
+  gives the sibling PR a neutral body and drops the commit messages.
+- **A conflict opens a neutral issue in the sibling, not a broken branch.**
+  The commands to resolve it go on the source PR. Whoever owns the sibling
+  resolves it on a `sync/` branch, labelled `chain-only`, committed as the
+  original author without `-x`.
 - **Never label a `sync/…` PR `shared`.** The workflow skips those branches
   anyway, but the label would be a lie.
 - **Merge by squash or merge commit, never rebase.** Rebase merging is off in
