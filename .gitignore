@@ -38,3 +38,8 @@ apps/landing/.data/
 
 # Soroban writes one JSON per test on every run; useful locally, noise in git
 contracts/**/test_snapshots/
+
+# Screen recordings (services/sandbox --record) can show a card being typed. Never commit one.
+*.webm
+*.mp4
+*.mov

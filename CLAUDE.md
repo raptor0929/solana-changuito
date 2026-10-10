@@ -351,18 +351,38 @@ is what it pays for, so the rules live here too.*
 The store's checkout used to open in an iframe and the shopper typed a card
 into it. Now the shopper locks USDC in the `changuito_escrow` program
 (`anchor/`), and a separate service (`services/sandbox`, Jev + Playwright)
-walks Día's checkout with the same basket. Reaching the card step settles the
-escrow to the treasury; anything else refunds it. `lib/checkout/` is the server
-half, `CheckoutModal.tsx` the browser half.
+logs into **the shopper's** Día account and buys the same basket with **our**
+card. Día placing the order settles the escrow to the treasury; anything else
+— a declined card, no card configured, a run that never reached payment —
+refunds it. `lib/checkout/` is the server half, `CheckoutModal.tsx` the browser
+half, and `docs/sandbox.md` the service.
 
-- **The sandbox never pays.** It stops at the card form, and the store's order
-  and payment endpoints are aborted at the network layer. "Settled" means the
-  basket was proven buyable, not that an order exists. Copy must not claim
-  more than that.
-- **The handoff link is the shopper's own cart** (`handoffUrl` from
-  `get_cart_link`), never the sandbox's `orderFormId`. The sandbox's cart
-  belongs to our Día account and opening it would expose that profile. The
-  sandbox's id goes into the receipt hash as evidence and nowhere else.
+*This section used to open with "the sandbox never pays". That rule was
+replaced on purpose, not eroded: the point of the product is that the order
+gets placed. What it was protecting is kept in the rules below.*
+
+- **The card is the gate.** The sandbox presses Pay only when all of `CARD_*`
+  is set; until the card is typed, the order and payment endpoints stay
+  aborted at the network layer. It is derived from the resource, per §5 —
+  do not add a `SANDBOX_PAY` flag that can outlive the card.
+- **Settle means Día placed the order**, and the receipt carries Día's order
+  number (`basis|sandbox-order-placed`). Copy must not claim more than the
+  sandbox's `payment` field says.
+- **The quote is goods + envío at belo's USDC `compra`.** The envío comes from
+  VTEX's simulation at the shopper's postal code, picked by the same rule the
+  sandbox uses at checkout — `lib/checkout/shipping.ts` mirrors `_pick_sla` in
+  `services/sandbox/checkout.py`, so change them together. No fallback rate
+  source: a different exchange's rate is a different price.
+- **The shopper's Día login is passed through, never kept.** It is in the
+  modal's state, the one `/api/checkout/start` request body and the sandbox
+  job's memory, and nowhere else: not the checkout record, not a log, not
+  `chat-store`. Same reasoning as the archive in §4, one step stronger: a
+  password opens their whole account.
+- **Never pay with a card saved in the shopper's account**, and never type
+  the shopper's DNI as the cardholder's (`CARD_DNI`). The card is ours.
+- **Known blocker:** Día's checkout refuses `/transaction` with `CHK0082`
+  (reCAPTCHA token required). We do not solve or bypass CAPTCHAs; see
+  `docs/sandbox.md`.
 - **`/api/checkout/start` reads the order PDA from chain before it starts a job**:
   buyer, status, amount and basket hash against the quote. A signature from
   the browser is a hint, not proof.
@@ -380,8 +400,8 @@ half, `CheckoutModal.tsx` the browser half.
   program rejects a second close anyway, but a failed transaction is a red
   line in the UI for nothing.
 - **No `SANDBOX_URL` in dev means a mock job** (`lib/checkout/sandbox.ts`), and
-  `SANDBOX_MOCK_FAIL=1` forces the refund path. In production the mock is off
-  unless `SANDBOX_MOCK=1`. `scripts/devnet-e2e.mts` drives the routes against
+  `SANDBOX_MOCK_FAIL=1` makes its card come back declined (the refund path).
+  In production the mock is off unless `SANDBOX_MOCK=1`. `scripts/devnet-e2e.mts` drives the routes against
   devnet with it.
 - **`next build` typechecks through `tsconfig.build.json`**, which leaves out
   `lib/test`. Several tests still pin Stellar behaviour and fail typecheck; per

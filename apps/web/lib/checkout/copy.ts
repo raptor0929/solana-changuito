@@ -7,9 +7,22 @@ export interface EscrowCopy {
   loginLead: string;
   loginCta: string;
   preparing: string;
+  subtotalLabel: string;
+  shippingLabel: string;
   totalLabel: string;
+  rateLabel: string;
   lockLabel: string;
-  rateNote: (rate: number) => string;
+  rateNote: (source: string) => string;
+  diaTitle: string;
+  diaLead: string;
+  emailLabel: string;
+  passwordLabel: string;
+  dniLabel: string;
+  addressMore: string;
+  streetLabel: string;
+  numberLabel: string;
+  phoneLabel: string;
+  diaMissing: string;
   escrowNote: string;
   balanceLabel: string;
   short: string;
@@ -21,11 +34,12 @@ export interface EscrowCopy {
   phases: Record<string, string>;
   shoppingNote: string;
   doneTitle: string;
-  doneLead: string;
+  doneLead: (orderId: string | null) => string;
   openStore: string;
   doneNote: string;
   refundedTitle: string;
   refundedLead: string;
+  declinedLead: string;
   lockTx: string;
   settleTx: string;
   refundTx: string;
@@ -35,14 +49,28 @@ export interface EscrowCopy {
 }
 
 const ES: EscrowCopy = {
-  title: 'Pagar el changuito',
-  steps: ['Entrar', 'Bloquear USDC', 'Comprar'],
+  title: 'Confirmar la compra',
+  steps: ['Entrar', 'Confirmar y bloquear', 'Comprar'],
   loginLead: 'Entrá con tu email. Te creamos una billetera de Solana (devnet) y nosotros pagamos las comisiones.',
   loginCta: 'Entrar con email',
   preparing: 'Preparando el pedido…',
-  totalLabel: 'Total en el súper',
-  lockLabel: 'A bloquear',
-  rateNote: (rate) => `Al cambio de $${Math.round(rate)} por dólar, con 15% extra para el envío.`,
+  subtotalLabel: 'Productos',
+  shippingLabel: 'Envío',
+  totalLabel: 'Total en Día',
+  rateLabel: 'Cotización',
+  lockLabel: 'Se bloquean',
+  rateNote: (source) => `Cotización ${source} del momento. El envío es el que cobra Día a tu código postal.`,
+  diaTitle: 'Tu cuenta de Día',
+  diaLead:
+    'Compramos en tu cuenta, así el pedido es tuyo y llega a tu dirección guardada. Usamos estos datos solo para esta compra: no los guardamos.',
+  emailLabel: 'Email',
+  passwordLabel: 'Contraseña',
+  dniLabel: 'DNI',
+  addressMore: '¿Tu cuenta de Día no tiene una dirección guardada?',
+  streetLabel: 'Calle',
+  numberLabel: 'Número',
+  phoneLabel: 'Teléfono',
+  diaMissing: 'Completá email, contraseña y DNI de tu cuenta de Día.',
   escrowNote:
     'La plata queda en un escrow en Solana, no con nosotros. Si la compra no llega al pago, vuelve a tu billetera sola.',
   balanceLabel: 'Tu saldo',
@@ -57,16 +85,18 @@ const ES: EscrowCopy = {
     login: 'Entrando a Día…',
     empty_cart: 'Vaciando el carrito de Día…',
     shop: 'Cargando los productos en Día…',
-    checkout: 'Pasando por la caja…',
-    payment: 'Llegando al pago…',
+    checkout: 'Eligiendo envío y pasando por la caja…',
+    payment: 'Pagando con tarjeta…',
+    placed: 'Pedido hecho.',
   },
-  shoppingNote: 'Un navegador en la nube está armando tu pedido en Día. Tarda un par de minutos.',
+  shoppingNote: 'Un navegador en la nube está armando y pagando tu pedido en Día. Tarda un par de minutos.',
   doneTitle: '¡Compra completada!',
-  doneLead: 'Tu changuito llegó al pago en Día y el escrow se liberó.',
+  doneLead: (id) => (id ? `Día aceptó tu pedido n.º ${id} y el escrow se liberó.` : 'Día aceptó tu pedido y el escrow se liberó.'),
   openStore: 'Abrir en Día',
-  doneNote: 'El link abre tu carrito en la tienda para terminar la entrega y el pago ahí.',
+  doneNote: 'Lo ves en "Mis pedidos" de tu cuenta de Día.',
   refundedTitle: 'No pudimos completar la compra',
   refundedLead: 'El escrow devolvió tus USDC a tu billetera.',
+  declinedLead: 'Día rechazó el pago con tarjeta. El escrow devolvió tus USDC a tu billetera.',
   lockTx: 'Bloqueo',
   settleTx: 'Liberación',
   refundTx: 'Devolución',
@@ -76,14 +106,28 @@ const ES: EscrowCopy = {
 };
 
 const EN: EscrowCopy = {
-  title: 'Pay for the basket',
-  steps: ['Sign in', 'Lock USDC', 'Shop'],
+  title: 'Confirm the purchase',
+  steps: ['Sign in', 'Confirm and lock', 'Shop'],
   loginLead: "Sign in with your email. We create a Solana (devnet) wallet for you and cover the fees.",
   loginCta: 'Sign in with email',
   preparing: 'Preparing the order…',
-  totalLabel: 'Store total',
+  subtotalLabel: 'Products',
+  shippingLabel: 'Delivery',
+  totalLabel: 'Total at Día',
+  rateLabel: 'Rate',
   lockLabel: 'To lock',
-  rateNote: (rate) => `At ${Math.round(rate)} pesos per dollar, plus 15% for delivery.`,
+  rateNote: (source) => `Live ${source} rate. Delivery is what Día charges to your postal code.`,
+  diaTitle: 'Your Día account',
+  diaLead:
+    "We buy in your account, so the order is yours and goes to your saved address. We use these only for this purchase and don't keep them.",
+  emailLabel: 'Email',
+  passwordLabel: 'Password',
+  dniLabel: 'DNI',
+  addressMore: 'No address saved in your Día account?',
+  streetLabel: 'Street',
+  numberLabel: 'Number',
+  phoneLabel: 'Phone',
+  diaMissing: 'Fill in your Día email, password and DNI.',
   escrowNote:
     "The money sits in an escrow on Solana, not with us. If the purchase doesn't reach payment, it goes back to your wallet on its own.",
   balanceLabel: 'Your balance',
@@ -98,16 +142,18 @@ const EN: EscrowCopy = {
     login: 'Signing in to Día…',
     empty_cart: "Emptying Día's cart…",
     shop: 'Adding the products at Día…',
-    checkout: 'Going through checkout…',
-    payment: 'Reaching payment…',
+    checkout: 'Choosing delivery and going through checkout…',
+    payment: 'Paying by card…',
+    placed: 'Order placed.',
   },
-  shoppingNote: 'A browser in the cloud is building your order at Día. It takes a couple of minutes.',
+  shoppingNote: 'A browser in the cloud is building and paying for your order at Día. It takes a couple of minutes.',
   doneTitle: 'Purchase completed!',
-  doneLead: 'Your basket reached payment at Día and the escrow was released.',
+  doneLead: (id) => (id ? `Día accepted order #${id} and the escrow was released.` : 'Día accepted your order and the escrow was released.'),
   openStore: 'Open in Día',
-  doneNote: 'The link opens your cart at the store to finish delivery and payment there.',
+  doneNote: 'You can see it under "My orders" in your Día account.',
   refundedTitle: "We couldn't complete the purchase",
   refundedLead: 'The escrow returned your USDC to your wallet.',
+  declinedLead: 'Día declined the card payment. The escrow returned your USDC to your wallet.',
   lockTx: 'Lock',
   settleTx: 'Release',
   refundTx: 'Refund',

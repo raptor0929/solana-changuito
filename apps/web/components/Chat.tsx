@@ -666,6 +666,7 @@ function ChatCore({
       {paying ? (
         <CheckoutModal
           cart={paying.cart}
+          location={state.snapshot?.location}
           handoffUrl={paying.handoffUrl}
           // The chat the server knows, which is the one `archiveChat` wrote —
           // `publish` files the record under the agent's session id, so this

@@ -34,8 +34,9 @@ that wants an account and a postcode.
 changuito is a chat agent that shops a real store (Día) over
 [MCP](https://modelcontextprotocol.io). When the basket is ready, the shopper
 signs in with an email, locks the USDC equivalent in a Solana escrow, and a
-browser agent walks the store's real checkout with that basket. If it reaches
-the payment step, the escrow settles; if it does not, the escrow refunds. Either
+browser agent buys that basket in the shopper's own store account with our
+card. If the store places the order, the escrow settles; if not, the escrow
+refunds. Either
 outcome is a devnet transaction the shopper gets a Solscan link for.
 
 ## 2. Fifteen minutes, in order
@@ -78,9 +79,9 @@ being told.
 | The escrow, the lock, settle and refund | **Real, on devnet.** Every step is a transaction with a link |
 | The USDC | **Our own devnet mint**, handed out by the in-app faucet. Not Circle's USDC, no value |
 | Gas | **Fees paid by the resolver** (a server hot key, so it must be kept topped up with devnet SOL). Rent is the buyer's: the faucet also sends 0.01 SOL when the wallet is below 0.006, which covers the ~0.004 SOL of rent for the order and vault accounts |
-| **A placed order at Día** | **Not done.** The sandbox walks the real checkout with the basket and **stops at the payment step**. Card entry is out of scope. Settle means "the agent proved it could get this basket to checkout"; the shopper finishes at Día through their own cart link |
-| Where settled USDC goes | **To a treasury we hold**, which does not pay Día. The 15% FX buffer (for envío, only known at checkout) goes with it. A demo simplification |
-| The checkout robot | **Runs on one operator Día account**, one job at a time, jobs held in memory. It adds one unit per line (quantity is recorded, not applied yet) and searches by name |
+| **A placed order at Día** | **Blocked.** The sandbox logs into the shopper's Día account, adds the basket by SKU, sets the envío, types our card and presses Pay; Día answers `CHK0082` (reCAPTCHA token required) before the card is evaluated. No order is placed, so every run refunds. Settle is wired to a placed order only |
+| Where settled USDC goes | **To a treasury we hold**, whose card pays Día. The quote is goods + envío at belo's USDC rate, with no buffer |
+| The checkout robot | **Logs into the shopper's own Día account** (login passed through, never stored), one job at a time, jobs held in memory. Adds lines by SKU at their quantity; name search only as a fallback |
 | Sandbox deployment | **Not deployed to Railway yet.** It runs locally in Docker, and a two-item escrow run against Día reached the payment step (214 s, 0 orders placed) and [settled](https://solscan.io/tx/3akyS29xEdce7Phd7TrVaPoTzxjWaf7Uum5Xn8g9nxgRafJZmvBgN28ahm94Yu8bzoQDtmR2G9L325RSPePearWP?cluster=devnet). On any build without `SANDBOX_URL`, an in-process mock plays the phases (0/4/7/15/20 s). The other settle/refund transactions above were produced against the mock |
 
 ### What is not done, as a list

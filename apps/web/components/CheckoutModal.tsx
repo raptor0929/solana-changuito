@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 
-import type { Cart } from '@changuito/mcp/types';
+import type { Cart, LocationContext } from '@changuito/mcp/types';
 
 import { track } from '../lib/analytics';
 import type { Receipt } from '../lib/chat-store.ts';
@@ -18,17 +18,21 @@ import { useLang } from './LangProvider';
  * From a full basket to a settled escrow, in four steps:
  *
  *   1. login   — email through Privy; the embedded Solana wallet comes with it.
- *   2. lock    — the server quotes (order id, basket hash, USDC amount) and
- *                builds `open` with the resolver as fee payer; the wallet
- *                signs it as the buyer, the server co-signs and sends. The
- *                USDC is now in a vault the program owns, not in an account
- *                of ours.
- *   3. shop    — the server starts a sandbox job (services/sandbox) that fills
- *                Día's cart and walks checkout to the card step. This dialog
+ *   2. lock    — the server quotes goods + envío at belo's USDC rate (order
+ *                id, basket hash, USDC amount) and the shopper confirms that
+ *                breakdown and types their Día login. The server builds
+ *                `open` with the resolver as fee payer; the wallet signs it
+ *                as the buyer, the server co-signs and sends. The USDC is
+ *                now in a vault the program owns, not in an account of ours.
+ *   3. shop    — the server starts a sandbox job (services/sandbox) that logs
+ *                into the shopper's Día account, fills the cart, picks the
+ *                delivery and pays with the operator's card. This dialog
  *                polls /api/checkout/status, which reports the phase.
- *   4. done    — the job reached payment: the resolver settled the escrow to
- *                the treasury and the shopper gets their own cart link to
- *                finish at the store. Or it failed and the escrow refunded.
+ *   4. done    — Día placed the order: the resolver settled the escrow to the
+ *                treasury. Anything else, a declined card included, refunds.
+ *
+ * The Día login lives in this component's state and in the one request to
+ * /api/checkout/start. It is never put in chat-store or anywhere else.
  *
  * The dialog never decides an outcome. Every stage after `lock` is what the
  * server read from the chain or the sandbox, and the server reads the chain
@@ -36,6 +40,8 @@ import { useLang } from './LangProvider';
  */
 interface Props {
   cart: Cart;
+  /** Where the shopper browsed (the chat's session snapshot): the envío is quoted here. */
+  location?: Pick<LocationContext, 'postalCode' | 'salesChannel' | 'country'>;
   handoffUrl?: string;
   chatId?: string;
   onClose: () => void;
@@ -44,9 +50,27 @@ interface Props {
 
 const POLL_MS = 3_000;
 
+const ARS = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
+const pesos = (centavos: number) => ARS.format(centavos / 100);
+
+interface DiaLogin {
+  email: string;
+  password: string;
+  dni: string;
+  street: string;
+  number: string;
+  phone: string;
+}
+
+const EMPTY_LOGIN: DiaLogin = { email: '', password: '', dni: '', street: '', number: '', phone: '' };
+
+function loginReady(d: DiaLogin): boolean {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email.trim()) && d.password.length > 0 && /^\d{7,9}$/.test(d.dni.replace(/\D/g, ''));
+}
+
 type Step = 'login' | 'review' | 'locking' | 'shopping' | 'done' | 'refunded';
 
-export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
+export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: Props) {
   const lang = useLang();
   const copy = escrowCopy(lang);
   const wallet = useWallet();
@@ -58,7 +82,9 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [funding, setFunding] = useState(false);
   const [openSig, setOpenSig] = useState<string | null>(null);
+  const [dia, setDia] = useState<DiaLogin>(EMPTY_LOGIN);
   const quoting = useRef(false);
+  const field = (k: keyof DiaLogin) => (e: ChangeEvent<HTMLInputElement>) => setDia((d) => ({ ...d, [k]: e.target.value }));
 
   // Signed in -> mint the session cookie -> quote. Once.
   useEffect(() => {
@@ -76,7 +102,7 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
         const res = await fetch('/api/checkout/quote', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ cart, handoffUrl }),
+          body: JSON.stringify({ cart, handoffUrl, location }),
         });
         const body = await res.json().catch(() => null);
         if (!res.ok) throw new Error(body?.error ?? copy.failed);
@@ -86,7 +112,7 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
         quoting.current = false;
       }
     })();
-  }, [wallet.ready, wallet.address, wallet.accessToken, quote, cart, handoffUrl, copy.failed]);
+  }, [wallet.ready, wallet.address, wallet.accessToken, quote, cart, location, handoffUrl, copy.failed]);
 
   const short = Boolean(quote && balance && BigInt(balance.usdc) < BigInt(quote.amount));
 
@@ -109,6 +135,10 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
 
   const lock = useCallback(async () => {
     if (!quote || !wallet.address) return;
+    if (!loginReady(dia)) {
+      setError(copy.diaMissing);
+      return;
+    }
     setStep('locking');
     setError(null);
     try {
@@ -135,18 +165,24 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
       const res = await fetch('/api/checkout/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ orderId: quote.orderId, openSig: sig }),
+        body: JSON.stringify({
+          orderId: quote.orderId,
+          openSig: sig,
+          dia: { email: dia.email.trim(), password: dia.password, dni: dia.dni.replace(/\D/g, '') },
+          address: { street: dia.street, number: dia.number, phone: dia.phone },
+        }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? copy.failed);
       setStatus(body as StatusResponse);
+      setDia(EMPTY_LOGIN); // sent once; nothing to keep it for
       setStep('shopping');
     } catch (e) {
       console.warn('[checkout] lock failed', e);
       setError(e instanceof Error && e.message ? e.message : copy.failed);
       setStep('review');
     }
-  }, [quote, wallet, copy.failed]);
+  }, [quote, wallet, dia, copy.failed, copy.diaMissing]);
 
   // Poll while the sandbox shops.
   useEffect(() => {
@@ -242,10 +278,22 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
 
           {(step === 'review' || step === 'locking') && quote ? (
             <div className="ck-pay" data-testid="checkout-lock-step">
-              <dl className="ck-totals">
+              <dl className="ck-totals" data-testid="checkout-breakdown">
+                <div className="ck-total-line">
+                  <dt>{copy.subtotalLabel}</dt>
+                  <dd>{pesos(quote.subtotalCentavos)}</dd>
+                </div>
+                <div className="ck-total-line">
+                  <dt>{copy.shippingLabel}</dt>
+                  <dd data-testid="checkout-shipping">{pesos(quote.shippingCentavos)}</dd>
+                </div>
                 <div className="ck-total-line">
                   <dt>{copy.totalLabel}</dt>
-                  <dd>{cart.total.display}</dd>
+                  <dd>{pesos(quote.totalCentavos)}</dd>
+                </div>
+                <div className="ck-total-line">
+                  <dt>{copy.rateLabel}</dt>
+                  <dd data-testid="checkout-rate">{pesos(Math.round(quote.arsPerUsd * 100))} / USDC</dd>
                 </div>
                 <div className="ck-total-line ck-total-sum">
                   <dt>{copy.lockLabel}</dt>
@@ -258,8 +306,44 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
                   </div>
                 ) : null}
               </dl>
-              <p className="ck-note">{copy.rateNote(quote.arsPerUsd)}</p>
+              <p className="ck-note">{copy.rateNote(quote.rateSource)}</p>
               <p className="ck-note">{copy.escrowNote}</p>
+
+              <fieldset className="ck-delivery" disabled={step === 'locking'} data-testid="checkout-dia">
+                <h3 className="ck-title">{copy.diaTitle}</h3>
+                <p className="ck-note">{copy.diaLead}</p>
+                <div className="ck-form">
+                  <label>
+                    {copy.emailLabel}
+                    <input className="ck-input" type="email" autoComplete="off" value={dia.email} onChange={field('email')} />
+                  </label>
+                  <label>
+                    {copy.passwordLabel}
+                    <input className="ck-input" type="password" autoComplete="off" value={dia.password} onChange={field('password')} />
+                  </label>
+                  <label>
+                    {copy.dniLabel}
+                    <input className="ck-input" inputMode="numeric" autoComplete="off" value={dia.dni} onChange={field('dni')} />
+                  </label>
+                </div>
+                <details className="ck-more">
+                  <summary>{copy.addressMore}</summary>
+                  <div className="ck-form">
+                    <label>
+                      {copy.streetLabel}
+                      <input className="ck-input" autoComplete="address-line1" value={dia.street} onChange={field('street')} />
+                    </label>
+                    <label>
+                      {copy.numberLabel}
+                      <input className="ck-input" inputMode="numeric" value={dia.number} onChange={field('number')} />
+                    </label>
+                    <label>
+                      {copy.phoneLabel}
+                      <input className="ck-input" type="tel" autoComplete="tel" value={dia.phone} onChange={field('phone')} />
+                    </label>
+                  </div>
+                </details>
+              </fieldset>
 
               {short ? (
                 <>
@@ -276,7 +360,7 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
                   className="btn"
                   data-testid="checkout-lock"
                   onClick={() => void lock()}
-                  disabled={step === 'locking' || short || !balance}
+                  disabled={step === 'locking' || short || !balance || !loginReady(dia)}
                 >
                   {step === 'locking' ? copy.locking : copy.lockCta(quote.amountDisplay)}
                 </button>
@@ -297,22 +381,15 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
           {step === 'done' ? (
             <div className="ck-pay" data-testid="checkout-done-step">
               <h3 className="ck-ok">{copy.doneTitle}</h3>
-              <p className="ck-lead">{copy.doneLead}</p>
-              {status?.handoffUrl ? (
-                <>
-                  <a className="btn" data-testid="checkout-handoff" href={status.handoffUrl} target="_blank" rel="noopener noreferrer">
-                    {copy.openStore}
-                  </a>
-                  <p className="ck-note">{copy.doneNote}</p>
-                </>
-              ) : null}
+              <p className="ck-lead">{copy.doneLead(status?.storeOrderId ?? null)}</p>
+              <p className="ck-note">{copy.doneNote}</p>
             </div>
           ) : null}
 
           {step === 'refunded' ? (
             <div className="ck-pay" data-testid="checkout-refunded-step">
               <h3 className="pay-warn">{copy.refundedTitle}</h3>
-              <p className="ck-lead">{copy.refundedLead}</p>
+              <p className="ck-lead">{status?.payment === 'declined' ? copy.declinedLead : copy.refundedLead}</p>
             </div>
           ) : null}
 

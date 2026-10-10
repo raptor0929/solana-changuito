@@ -1,7 +1,9 @@
 """Sandboxed Playwright browser for Jev on Dia Argentina (VTEX store + Flutter login popup).
 
-The browser acts; it never decides. Every decision comes from Jev in agent.py.
-Credentials are read from the environment here and never leave this module.
+The browser acts; it never decides what to buy. Login decisions come from Jev in agent.py,
+the rest of checkout is deterministic (checkout.py).
+Credentials arrive per job (`Secrets`) and never leave this module: Jev picks a `fill_*`
+action, the sandbox types the value, and every known value is redacted from what Jev reads.
 """
 
 from __future__ import annotations
@@ -36,9 +38,16 @@ ALLOWED_HOSTS = (
     "maps.googleapis.com", "maps.gstatic.com",  # the delivery-location modal needs Google Maps
     "io2.vtex.com",  # VTEX checkout UI scripts
     "myvtex.com",  # store account host used by checkout (diaio.myvtex.com)
+    # The card form: VTEX's card-ui iframe and the gateway that tokenizes the card.
+    "vtexpayments.com.br",
+    "mercadopago.com", "mlstatic.com",  # Día's card connector loads Mercado Pago's secure fields
+    # VTEX checkout asks reCAPTCHA v3 for a token before it creates the transaction; without it
+    # POST /transaction answers 403 and the UI retries forever.
+    "www.google.com", "recaptcha.net",
 )
 
-# Network-level guarantee that no order is placed, whatever gets clicked.
+# Network-level guarantee that no order is placed, whatever gets clicked, until checkout.py
+# lifts it on purpose (`allow_payment`) after the card is typed and CARD_PAN is configured.
 ORDER_ENDPOINTS = re.compile(r"/transaction|/gatewayCallback|/payments\b|orderPlaced", re.I)
 
 # Never offered to Jev, never clicked.
@@ -51,15 +60,48 @@ BLOCKED = re.compile(
 REPLACE = re.compile(r"reemplaz|sustitu|cambiar por (otro|similar)", re.I)
 NO_REPLACE = re.compile(r"\bno\b.*(reemplaz|sustitu)|sin reemplazo", re.I)
 
-# Built-in fill actions: Jev chooses them, the sandbox types the value from the environment.
+# Built-in fill actions: Jev chooses them, the sandbox types the value from the job's secrets.
 SECRET_FIELDS = {
-    "fill_dni": ("DIA_ARG_DNI", re.compile(r"\bdni\b|documento", re.I), "account DNI"),
-    "fill_email": ("DIA_ARG_EMAIL", re.compile(r"correo|e-?mail", re.I), "account email"),
-    "fill_password": ("DIA_ARG_PWD", re.compile(r"contrase|password|clave", re.I), "account password"),
-    "fill_postcode": ("DIA_ARG_POSTCODE", re.compile(r"c[oó]digo postal|\bcp\b", re.I), "delivery postcode"),
+    "fill_dni": ("dni", re.compile(r"\bdni\b|documento", re.I), "account DNI"),
+    "fill_email": ("email", re.compile(r"correo|e-?mail", re.I), "account email"),
+    "fill_password": ("password", re.compile(r"contrase|password|clave", re.I), "account password"),
+    "fill_postcode": ("postcode", re.compile(r"c[oó]digo postal|\bcp\b", re.I), "delivery postcode"),
+    "fill_street": ("street", re.compile(r"\bcalle\b|direcci[oó]n", re.I), "delivery street"),
+    "fill_number": ("number", re.compile(r"n[uú]mero|altura", re.I), "delivery street number"),
+    "fill_phone": ("phone", re.compile(r"tel[eé]fono|celular", re.I), "contact phone"),
 }
 
-MAX_ELEMENTS = 240
+# Redaction tags, longest-lived values first. Card values are added by checkout.py.
+REDACT_TAGS = {"dni": "[DNI]", "email": "[EMAIL]", "postcode": "[CP]", "password": "[PWD]",
+               "street": "[STREET]", "phone": "[PHONE]", "pan": "[PAN]", "cvv": "[CVV]", "holder": "[NAME]",
+               "card_dni": "[DNI]"}
+
+# Env fallback for the CLI and for jobs that carry no credentials.
+ENV_SECRETS = {"dni": "DIA_ARG_DNI", "email": "DIA_ARG_EMAIL", "password": "DIA_ARG_PWD",
+               "postcode": "DIA_ARG_POSTCODE", "street": "DIA_ARG_ADDR_STREET", "number": "DIA_ARG_ADDR_NUMBER",
+               "phone": "DIA_ARG_ADDR_PHONE", "complement": "DIA_ARG_ADDR_COMPLEMENT"}
+
+
+class Secrets(dict):
+    """Per-job values the sandbox types and redacts. Never printed: `repr` shows keys only."""
+
+    @classmethod
+    def build(cls, job: dict | None = None) -> "Secrets":
+        job = {k: v for k, v in (job or {}).items() if v}
+        # A job that brings the shopper's login brings everything: the operator's env values
+        # (account, address) must never be typed into somebody else's account.
+        if any(job.get(k) for k in ("dni", "email", "password")):
+            return cls({k: str(job[k]) for k in ENV_SECRETS if k in job})
+        return cls({k: str(job.get(k) or os.environ[env]) for k, env in ENV_SECRETS.items()
+                    if job.get(k) or os.environ.get(env)})
+
+    def __repr__(self) -> str:
+        return f"Secrets({sorted(self)})"
+
+    __str__ = __repr__
+
+MAX_ELEMENTS = 120
+PAGE_TEXT = 1500  # chars of page text Jev reads per step; the open modal comes first
 MODAL_SELECTOR = "[class*=modal-layout-0-x-paper], [role=dialog], [aria-modal=true]"
 
 COLLECT_JS = r"""
@@ -198,13 +240,20 @@ class Sandbox:
     context: BrowserContext | None = None
     main: Page | None = None
     tracing: bool = False
+    secrets: Secrets = field(default_factory=Secrets)
+    allow_payment: bool = False
+    # CLI debugging only (agent.py --record). A video cannot skip the card step, so it shows the
+    # card being typed: never with a real card, and never from the job API.
+    record_dir: str | None = None
 
     async def start(self, pw: Playwright) -> None:
         self.browser = await pw.chromium.launch(
             headless=not self.headed, channel="chromium", slow_mo=250 if self.headed else 0
         )
+        video = {"record_video_dir": self.record_dir, "record_video_size": {"width": 1366, "height": 900}} \
+            if self.record_dir else {}
         self.context = await self.browser.new_context(
-            locale="es-AR", user_agent=UA, viewport={"width": 1366, "height": 900}, accept_downloads=False
+            locale="es-AR", user_agent=UA, viewport={"width": 1366, "height": 900}, accept_downloads=False, **video
         )
         await self.context.route("**/*", self._guard)
         self.main = await self.context.new_page()
@@ -214,16 +263,22 @@ class Sandbox:
         await self.context.tracing.start(screenshots=True, snapshots=True, sources=False)
         self.tracing = True
 
-    async def stop(self, trace_path: str | None = None) -> None:
-        if self.tracing and trace_path:
+    async def stop_trace(self, trace_path: str | None = None) -> None:
+        # Also called before the card is typed: a trace with a PAN in it must never exist.
+        if self.tracing:
+            self.tracing = False
             await self.context.tracing.stop(path=trace_path)
+
+    async def stop(self, trace_path: str | None = None) -> None:
+        await self.stop_trace(trace_path)
         if self.browser:
             await self.browser.close()
 
     async def _guard(self, route) -> None:
         req = route.request
         host = urlparse(req.url).hostname or ""
-        if ORDER_ENDPOINTS.search(req.url) and (req.method != "GET" or req.is_navigation_request()):
+        if (not self.allow_payment and ORDER_ENDPOINTS.search(req.url)
+                and (req.method != "GET" or req.is_navigation_request())):
             self.order_attempts.append(f"{req.method} {req.url[:120]}")
             await route.abort()
         elif not any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS):
@@ -247,9 +302,11 @@ class Sandbox:
         await self.settle()
         return resp.status if resp else 0
 
-    async def settle(self, ms: int = 1500) -> None:
+    async def settle(self, ms: int = 500) -> None:
+        # The Flutter popup and VTEX checkout keep polling, so networkidle often never comes:
+        # a short cap keeps a step from costing 5 s of nothing.
         try:
-            await self.page.wait_for_load_state("networkidle", timeout=5000)
+            await self.page.wait_for_load_state("networkidle", timeout=2000)
         except Exception:
             pass
         await self.page.wait_for_timeout(ms)
@@ -279,9 +336,9 @@ class Sandbox:
         elements = []
         for e in raw:
             # Labels reach Jev and the logs too (e.g. saved addresses), so they get the same redaction as page text.
-            e["label"], e["context"] = redact(e["label"]), redact(e["context"])
+            e["label"], e["context"] = self.redact(e["label"]), self.redact(e["context"])
             if e["options"]:
-                e["options"] = [redact(o) for o in e["options"]]
+                e["options"] = [self.redact(o) for o in e["options"]]
             text = f"{e['label']} {e['href']}"
             if BLOCKED.search(text):
                 continue
@@ -289,9 +346,9 @@ class Sandbox:
                 continue
             elements.append(e)
         fills: dict[str, str] = {}
-        for action, (env, pattern, _) in SECRET_FIELDS.items():
+        for action, (key, pattern, _) in SECRET_FIELDS.items():
             target = next((e for e in elements if e["field"] and pattern.search(e["label"])), None)
-            if target and os.environ.get(env):
+            if target and self.secrets.get(key):
                 fills[action] = target["id"]
         # Fields that take secrets are reachable only through the fill_* actions.
         filled = {a: next(e for e in elements if e["id"] == i)["label"].endswith("(filled)") for a, i in fills.items()}
@@ -306,7 +363,7 @@ class Sandbox:
                 text = "[OPEN MODAL] " + re.sub(r"\s+", " ", modal) + " [PAGE BEHIND] " + text
         except Exception:
             text = ""
-        return Snapshot(self.page.url, await self.page.title(), redact(text)[:3000], elements, fills, filled)
+        return Snapshot(self.page.url, await self.page.title(), self.redact(text)[:PAGE_TEXT], elements, fills, filled)
 
     async def highlight(self, el_id: str | None, banner: str, tag: str = "") -> None:
         try:
@@ -324,23 +381,23 @@ class Sandbox:
         await self.settle()
 
     async def fill_secret(self, action: str, el_id: str) -> None:
-        env, _, _ = SECRET_FIELDS[action]
+        key, _, _ = SECRET_FIELDS[action]
         page = self.page
         loc = page.locator(f'[data-jev-id="{el_id}"]').first
         # Flutter's glass pane intercepts pointer clicks on its text fields; focusing works everywhere.
         await loc.focus(timeout=6000)
         await page.keyboard.press("ControlOrMeta+a")
         await page.keyboard.press("Backspace")
-        await page.keyboard.type(os.environ[env], delay=40 if self.headed else 0)
+        await page.keyboard.type(self.secrets[key], delay=40 if self.headed else 0)
         await page.wait_for_timeout(600)
 
     async def search(self, query: str) -> None:
         await self.main.goto(f"{BASE}/{query}?_q={query}&map=ft", wait_until="domcontentloaded")
-        await self.settle(2500)
+        await self.settle(1500)
 
     async def open_cart(self) -> None:
         await self.main.goto(f"{BASE}/checkout/#/cart", wait_until="domcontentloaded")
-        await self.settle(2500)
+        await self.settle(1500)
 
     async def back(self) -> None:
         await self.page.go_back(wait_until="domcontentloaded")
@@ -379,12 +436,10 @@ class Sandbox:
     async def on_payment_step(self) -> bool:
         return "#/payment" in self.main.url
 
-
-def redact(text: str) -> str:
-    # Known account values never reach Jev, even when the page displays them.
-    for env, tag in (("DIA_ARG_DNI", "[DNI]"), ("DIA_ARG_EMAIL", "[EMAIL]"),
-                     ("DIA_ARG_POSTCODE", "[CP]"), ("DIA_ARG_PWD", "[PWD]")):
-        value = os.environ.get(env)
-        if value:
-            text = text.replace(value, tag)
-    return text
+    def redact(self, text: str) -> str:
+        # Known account and card values never reach Jev or a log, even when the page displays them.
+        for key, tag in REDACT_TAGS.items():
+            value = self.secrets.get(key)
+            if value and len(value) >= 3:
+                text = text.replace(value, tag)
+        return text

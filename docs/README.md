@@ -2,8 +2,8 @@
 
 changuito is a chat app where an agent shops an Argentine supermarket over MCP,
 locks the basket's USDC equivalent in a Solana escrow, and has a browser agent
-walk the store's real checkout with that basket. Reaching the payment step
-settles the escrow; anything else refunds it. Solana devnet only.
+buy that basket in the shopper's own store account with our card. A placed
+order settles the escrow; anything else refunds it. Solana devnet only.
 
 **Reviewing this for a hackathon? Start at [judges.md](judges.md).**
 
@@ -39,17 +39,17 @@ Elsewhere in the repo:
   Pagar → sign in with email or Google (Privy creates a Solana wallet)
         │
         ▼
-  the server quotes the cart in USDC (live ARS/USD + 15% for envío)
+  the server quotes goods + envío (Día's simulation) in USDC at belo's rate
         │
         ▼
   one transaction, buyer-signed, fee paid by the resolver:
   USDC ──► escrow vault (an Order account on chain)
         │
         ▼
-  the server checks the order on chain, then the sandbox walks Día's
-  checkout with the basket, and stops at the payment step
+  the server checks the order on chain, then the sandbox logs into the
+  shopper's Día account, fills the basket by SKU and pays with our card
         │
-        ├── reached payment ──► settle: vault ──► treasury, receipt hash on chain
+        ├── order placed ──► settle: vault ──► treasury, receipt hash on chain
         │                       "¡Compra completada!" + the shopper's cart link
         │
         └── anything else ────► refund: vault ──► buyer

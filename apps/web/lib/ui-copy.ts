@@ -247,7 +247,7 @@ const ES: UiCopy = {
     aria: 'Carrito',
     title: 'Tu changuito',
     total: 'Total',
-    payCta: 'Pagá con USDC',
+    payCta: 'Proceder al pago',
     openAt: (store) => `Abrir en ${store}`,
     oosOne: '1 producto quedó sin stock.',
     oosMany: (n) => `${n} productos quedaron sin stock.`,
@@ -443,7 +443,7 @@ const EN: UiCopy = {
     // would rename the product on one of the two screens it appears on.
     title: 'Your changuito',
     total: 'Total',
-    payCta: 'Pay with USDC',
+    payCta: 'Proceed to checkout',
     openAt: (store) => `Open in ${store}`,
     oosOne: '1 item went out of stock.',
     oosMany: (n) => `${n} items went out of stock.`,

@@ -8,7 +8,13 @@ export interface QuoteResponse {
   amountDisplay: string;
   basketHash: string;
   timeoutSecs: number;
+  /** Pesos per USDC, and where it came from (belo · USDC, or the ARS_PER_USD override). */
   arsPerUsd: number;
+  rateSource: string;
+  /** Goods, envío and their sum, in centavos. The USDC amount is the sum at `arsPerUsd`. */
+  subtotalCentavos: number;
+  shippingCentavos: number;
+  totalCentavos: number;
   programId: string;
   usdcMint: string;
 }
@@ -20,6 +26,10 @@ export interface StatusResponse {
   stage: CheckoutStage;
   /** The sandbox phase while shopping: login, empty_cart, shop, checkout, payment. */
   phase: string | null;
+  /** What the store answered when the card was submitted: placed, declined, not_attempted, error. */
+  payment: string | null;
+  /** Día's order number, once placed. */
+  storeOrderId: string | null;
   openSig: string | null;
   closeSig: string | null;
   handoffUrl: string | null;

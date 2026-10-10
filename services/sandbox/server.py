@@ -1,6 +1,6 @@
 """changuito's sandbox job API around agent.run_job.
 
-    POST /jobs        {order_id, items: [{name, quantity, sku?}]}  -> {job_id}
+    POST /jobs        {order_id, items: [{name, quantity, sku?}], shopper?}  -> {job_id}
     GET  /jobs/{id}   -> {job_id, status, phase, result?, error?}
     GET  /health      -> {ok, busy, queued}
 
@@ -8,10 +8,16 @@ Auth is `Authorization: Bearer $SANDBOX_TOKEN` on /jobs. The app (apps/web,
 lib/checkout/sandbox.ts) starts a job after the shopper's USDC is locked in
 the escrow, polls it, and settles or refunds on the result.
 
-One job at a time, on purpose: there is one Día account and its cart is tied
-to its session, so two concurrent runs would empty and fill the same cart.
-Jobs live in memory. A restart loses them, and the app reads a 404 for a job
-it started as a failure and refunds — the safe direction.
+`shopper` is the shopper's Día login ({email, password, dni}) plus where to
+deliver if their account has no saved address ({postcode, street, number,
+phone, complement}). It lives on the in-memory job until the run ends and is
+then deleted; `GET /jobs/{id}` never returns it and nothing logs it. Without
+`shopper` the run uses the operator's DIA_ARG_* account, which is for local
+testing.
+
+One job at a time, on purpose: one browser, one card, and a cart tied to a
+session. Jobs live in memory. A restart loses them, and the app reads a 404
+for a job it started as a failure and refunds — the safe direction.
 """
 
 from __future__ import annotations
@@ -44,9 +50,26 @@ class Item(BaseModel):
     sku: str | None = None
 
 
+class Shopper(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=128, repr=False)
+    dni: str = Field(pattern=r"^\d{7,9}$")
+    postcode: str | None = Field(default=None, max_length=12)
+    street: str | None = Field(default=None, max_length=120)
+    number: str | None = Field(default=None, max_length=20)
+    phone: str | None = Field(default=None, max_length=30)
+    complement: str | None = Field(default=None, max_length=120)
+
+    def __repr__(self) -> str:  # never print a shopper, even in a traceback
+        return "Shopper(<redacted>)"
+
+    __str__ = __repr__
+
+
 class JobIn(BaseModel):
     order_id: str = Field(min_length=8, max_length=128)
     items: list[Item] = Field(min_length=1, max_length=MAX_ITEMS)
+    shopper: Shopper | None = None
 
 
 def auth(authorization: str = Header(default="")) -> None:
@@ -74,15 +97,15 @@ async def worker() -> None:
             job["phase"] = name
 
         try:
-            # The harness searches by text and adds one unit per line; the
-            # quantity is recorded on the job, not yet applied (docs/sandbox.md).
-            terms = [i["name"] for i in job["items"]]
-            out = await run_job(terms, on_phase=on_phase)
+            # Lines with a SKU go into the cart through VTEX's API at their quantity;
+            # the rest are searched for by name.
+            out = await run_job(job["items"], secrets=job.pop("shopper", None), on_phase=on_phase)
             job.update(status=out["status"], phase=out["phase"], result=out, error=out.get("error"))
         except Exception as e:  # noqa: BLE001 — a crashed run is a failed job, never a dead worker
             traceback.print_exc()
             job.update(status="failed", error=f"{type(e).__name__}: {e}"[:300])
         finally:
+            job.pop("shopper", None)  # gone however the run ended
             job["finished"] = time.time()
             busy = False
             for old in [k for k, v in jobs.items() if v.get("finished", time.time()) < time.time() - KEEP_S]:
@@ -112,7 +135,8 @@ async def create(body: JobIn) -> dict:
             return {"job_id": j["job_id"]}
     job_id = uuid.uuid4().hex
     jobs[job_id] = {"job_id": job_id, "order_id": body.order_id, "status": "queued", "phase": "queued",
-                    "items": [i.model_dump() for i in body.items], "created": time.time()}
+                    "items": [i.model_dump() for i in body.items], "created": time.time(),
+                    "shopper": body.shopper.model_dump(exclude_none=True) if body.shopper else None}
     await queue.put(job_id)
     return {"job_id": job_id}
 

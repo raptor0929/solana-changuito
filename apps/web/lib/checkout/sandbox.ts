@@ -1,21 +1,29 @@
 /**
  * The client for services/sandbox: a Jev + Playwright worker on Railway that
- * fills a Día cart with the basket and walks checkout up to the card step.
+ * logs into the shopper's Día account, fills its cart with the basket, walks
+ * checkout and pays with the operator's card.
  *
- *   POST {SANDBOX_URL}/jobs        { order_id, items }   -> { job_id }
- *   GET  {SANDBOX_URL}/jobs/{id}                         -> SandboxJob
+ *   POST {SANDBOX_URL}/jobs        { order_id, items, shopper }   -> { job_id }
+ *   GET  {SANDBOX_URL}/jobs/{id}                                  -> SandboxJob
+ *
+ * `shopper` carries the shopper's Día login. It goes from the start route
+ * straight into this request body and nowhere else: not the checkout record,
+ * not a log line. The sandbox holds it in memory for the run and drops it.
  *
  * Without SANDBOX_URL, outside production, a mock answers instead: it walks
- * the same phases on a clock (~20s) and then reports `reached_payment`. That
- * is how the escrow flow is exercised locally without a browser farm.
- * `SANDBOX_MOCK_FAIL=1` makes it fail at the checkout phase, which is the
+ * the same phases on a clock (~20s) and then reports a placed order. That is
+ * how the escrow flow is exercised locally without a browser farm.
+ * `SANDBOX_MOCK_FAIL=1` makes the payment come back declined, which is the
  * refund path.
  *
  * The mock is stateless on purpose: the phase is derived from when the job
  * started, so it survives Next compiling each route into its own bundle.
  */
 
-export type SandboxPhase = 'queued' | 'login' | 'empty_cart' | 'shop' | 'checkout' | 'payment';
+export type SandboxPhase = 'queued' | 'login' | 'empty_cart' | 'shop' | 'checkout' | 'payment' | 'placed';
+
+/** What the store answered to the card. Only `placed` settles the escrow. */
+export type SandboxPayment = 'placed' | 'declined' | 'not_attempted' | 'error';
 
 export interface SandboxJob {
   job_id: string;
@@ -25,10 +33,21 @@ export interface SandboxJob {
   result?: {
     /** True when the job reached Día's card step. */
     reached_payment: boolean;
+    payment?: SandboxPayment;
+    /** One line from the store's answer, with known personal values redacted by the sandbox. */
+    payment_detail?: string | null;
+    /** Día's order number, when placed. */
+    store_order_id?: string | null;
     items_added: number;
-    cart?: { orderFormId?: string; value?: number; items?: { name: string; quantity: number }[] };
+    cart?: {
+      orderFormId?: string;
+      value?: number;
+      shipping_centavos?: number | null;
+      items?: { name: string; quantity: number; price?: number }[];
+    };
     final_url?: string;
     wall_s?: number;
+    timings?: Record<string, number>;
   };
   error?: string;
 }
@@ -37,6 +56,18 @@ export interface SandboxItem {
   name: string;
   quantity: number;
   sku: string;
+}
+
+/** The shopper's Día login and where to deliver. Never stored; see the header. */
+export interface SandboxShopper {
+  email: string;
+  password: string;
+  dni: string;
+  postcode?: string;
+  street?: string;
+  number?: string;
+  phone?: string;
+  complement?: string;
 }
 
 export function sandboxMode(env: NodeJS.ProcessEnv = process.env): 'remote' | 'mock' | 'off' {
@@ -53,6 +84,7 @@ function remote(env: NodeJS.ProcessEnv) {
 export async function startJob(
   orderId: string,
   items: SandboxItem[],
+  shopper: SandboxShopper,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
   const mode = sandboxMode(env);
@@ -65,7 +97,7 @@ export async function startJob(
   const res = await fetch(`${base}/jobs`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ order_id: orderId, items }),
+    body: JSON.stringify({ order_id: orderId, items, shopper }),
   });
   if (!res.ok) throw new Error(`sandbox answered ${res.status}`);
   const body = (await res.json()) as { job_id?: string };
@@ -80,6 +112,7 @@ const MOCK_PLAN: [number, SandboxPhase][] = [
   [7, 'shop'],
   [15, 'checkout'],
   [20, 'payment'],
+  [24, 'placed'],
 ];
 
 function mockJob(jobId: string): SandboxJob {
@@ -89,16 +122,17 @@ function mockJob(jobId: string): SandboxJob {
   for (const [at, p] of MOCK_PLAN) if (elapsed >= at) phase = p;
   const items = Number(count) || 0;
 
-  if (flag === 'f' && phase === 'payment') {
-    return { job_id: jobId, status: 'failed', phase: 'checkout', error: 'mock: forced failure (SANDBOX_MOCK_FAIL=1)' };
-  }
-  if (phase !== 'payment') return { job_id: jobId, status: 'running', phase };
+  if (phase !== 'placed') return { job_id: jobId, status: 'running', phase };
+  const declined = flag === 'f';
   return {
     job_id: jobId,
     status: 'done',
-    phase,
+    phase: declined ? 'payment' : 'placed',
     result: {
       reached_payment: true,
+      payment: declined ? 'declined' : 'placed',
+      payment_detail: declined ? 'mock: card declined (SANDBOX_MOCK_FAIL=1)' : 'mock: order placed',
+      store_order_id: declined ? null : `mock-${started}`,
       items_added: items,
       cart: { orderFormId: `mock-orderform-${started}` },
       final_url: 'https://diaonline.supermercadosdia.com.ar/checkout/#/payment',
