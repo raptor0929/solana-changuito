@@ -247,7 +247,7 @@ throwaway keypair in place of Privy:
 ```sh
 node --experimental-strip-types scripts/devnet-e2e.mts [http://localhost:3124]
 # faucet → quote → sign + send open → start → poll status
-# with SANDBOX_MOCK_FAIL=1 on the dev server, the same run ends in a refund
+# with config.sandbox_mock_fail on (npm run config), the same run ends in a refund
 ```
 
 Note: `initialize` accepts any payer, so on a fresh deploy it should run

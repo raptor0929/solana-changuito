@@ -176,9 +176,9 @@ No auth; Railway's healthcheck uses it.
 
 | `sandboxMode()` | When | Behaviour |
 |---|---|---|
-| `remote` | `SANDBOX_URL` is set | real HTTP calls with `Bearer SANDBOX_TOKEN` |
-| `mock` | no `SANDBOX_URL`, outside production — or in production with `SANDBOX_MOCK=1` | in-process, stateless mock: the job id encodes its start time; phases `login` 0s → `empty_cart` 4s → `shop` 7s → `checkout` 15s → `payment` 20s → `placed` 24s with `payment: "placed"`. `SANDBOX_MOCK_FAIL=1` makes the card come back `declined` (the refund path) |
-| `off` | production, no `SANDBOX_URL`, no `SANDBOX_MOCK` | `startJob` throws; the order is refunded on the next status poll |
+| `remote` | mock off and `SANDBOX_URL` is set | real HTTP calls with `Bearer SANDBOX_TOKEN` |
+| `mock` | `config.sandbox_mock` is on (`npm run config -- set sandbox_mock true`), whatever `SANDBOX_URL` says | in-process, stateless mock: the job id encodes its start time; phases `login` 0s → `empty_cart` 4s → `shop` 7s → `checkout` 15s → `payment` 20s → `placed` 24s with `payment: "placed"`. `config.sandbox_mock_fail` makes the card come back `declined` (the refund path) |
+| `off` | mock off and no `SANDBOX_URL` (also: no database, so no `config` row) | `startJob` throws; the order is refunded on the next status poll |
 
 The mapping into the escrow lives in `app/api/checkout/status/route.ts`:
 
@@ -308,7 +308,7 @@ chromium`, then `uvicorn server:app` on `$PORT` (default 8080).
 
 3. Deploy; check `GET https://<service>/health` returns `{"ok": true, …}`.
 4. In the web app (Vercel) set `SANDBOX_URL=https://<service>` and the same
-   `SANDBOX_TOKEN`. Unset `SANDBOX_MOCK` / `SANDBOX_MOCK_FAIL`.
+   `SANDBOX_TOKEN`, and `npm run config -- set sandbox_mock false`.
 
 ## Run locally
 

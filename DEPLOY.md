@@ -3,7 +3,7 @@
 Three pieces, and only the first two are needed for a working deployment:
 
 1. **The web app on Vercel** (`apps/web`) — the chat, the wallet, the checkout routes.
-2. **The sandbox on Railway** (`services/sandbox`) — the browser agent that walks Día's checkout. Without it, a non-production build uses an in-process mock, and production needs `SANDBOX_MOCK=1`.
+2. **The sandbox on Railway** (`services/sandbox`) — the browser agent that walks Día's checkout. Without it, turn the in-process mock on with `npm run config -- set sandbox_mock true` (a row in the `config` table, no redeploy).
 3. **The escrow program on Solana devnet** — already deployed. Its addresses are committed in `deployments.json` and the generated `apps/web/lib/deployments.ts`, so **you only need Part 3 to redeploy your own copy.**
 
 Devnet only. There is no mainnet configuration and no network switch.
@@ -74,7 +74,8 @@ Every variable, with what happens when it is missing, is in
 | `CHG_SESSION_SECRET` | `openssl rand -hex 32`. Signs the `chg_user` cookie; unset in production, login answers 503. Rotating it signs everyone out |
 | `SOLANA_RESOLVER_SECRET` | the contents of `resolver.json` (the 64-number JSON array), or its base58 form. Checked against the resolver address in `lib/deployments.ts` and refused if it does not match |
 | `SOLANA_RPC_URL`, `NEXT_PUBLIC_SOLANA_RPC_URL` | optional; a dedicated devnet RPC. The public `api.devnet.solana.com` rate-limits under traffic |
-| `SANDBOX_URL`, `SANDBOX_TOKEN` | from Part 2. Until then, set `SANDBOX_MOCK=1` or checkout cannot start in production |
+| `SANDBOX_URL`, `SANDBOX_TOKEN` | from Part 2. Until then, `npm run config -- set sandbox_mock true` or checkout cannot start |
+| `PROFILE_ENC_KEY` | `openssl rand -base64 32`. Encrypts the shoppers' saved Día details; without it the profile is unavailable. Rotate by moving the old value to `PROFILE_ENC_KEY_OLD` |
 | `DATABASE_URL` | from 1.5; the transaction pooler string |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | from 1.1 |
 | `ARS_PER_USD` | optional; pins the rate for a demo |
@@ -98,7 +99,7 @@ Four of these fail in ways worth knowing before they happen:
   shopping cannot be settled or refunded. Never prefix it `NEXT_PUBLIC_` and
   never log it.
 - **Without `SANDBOX_URL` in production, checkout refunds.** `sandboxMode()` is
-  `off` there unless `SANDBOX_MOCK=1`, so a shopper who locks USDC gets it back
+  `off` there unless `config.sandbox_mock` is on, so a shopper who locks USDC gets it back
   at the first status poll.
 
 Only the `NEXT_PUBLIC_` names reach the browser. Do not add the prefix to any
@@ -205,7 +206,7 @@ one operator Día account and runs one job at a time. Details in
 1. **Settings → Networking → Generate Domain.**
 2. Check it: `curl https://<railway-domain>/health`.
 3. In Vercel, set `SANDBOX_URL=https://<railway-domain>` and
-   `SANDBOX_TOKEN` to the **same** value as on Railway. Remove `SANDBOX_MOCK`.
+   `SANDBOX_TOKEN` to the **same** value as on Railway, then `npm run config -- set sandbox_mock false`.
 4. Redeploy the web app so the new variables take effect.
 
 A sandbox restart drops its in-memory jobs. The app sees a 404 on the next

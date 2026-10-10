@@ -6,6 +6,7 @@ import { track, trackLoginStart } from '../lib/analytics';
 import { GRANT_UNITS } from '../lib/faucet-policy.ts';
 import { usdcAmount } from '../lib/faucet-copy.ts';
 import { modeCopy, previewMasthead } from '../lib/mode-copy.ts';
+import { initials, profileCopy } from '../lib/profile-copy.ts';
 import { ensureUserCookie, forgetUserCookie } from '../lib/session-login.ts';
 import { useBalances } from '../lib/use-balances.ts';
 import { shortAddress, useWallet } from '../lib/use-wallet.ts';
@@ -14,6 +15,7 @@ import { useLang } from './LangProvider';
 import { FaucetConfirm } from './FaucetConfirm';
 import { ModeBadge } from './ModeBadge';
 import { OrdersModal } from './OrdersModal';
+import { ProfileModal } from './ProfileModal';
 import { ReceiveModal } from './ReceiveModal';
 
 /**
@@ -38,6 +40,8 @@ export function WalletWidget() {
   const [note, setNote] = useState<string | null>(null);
   const [receiving, setReceiving] = useState(false);
   const [showingOrders, setShowingOrders] = useState(false);
+  const [showingProfile, setShowingProfile] = useState(false);
+  const profileButton = useRef<HTMLButtonElement>(null);
   const fundButton = useRef<HTMLButtonElement>(null);
   const receiveButton = useRef<HTMLButtonElement>(null);
 
@@ -108,7 +112,20 @@ export function WalletWidget() {
   return (
     <div className="wallet">
       <div className="wallet-head">
-        <span className="wallet-label">{wallet.email ?? copy.label}</span>
+        <span className="wallet-who">
+          <button
+            ref={profileButton}
+            type="button"
+            className="avatar"
+            data-testid="wallet-profile"
+            aria-label={profileCopy(lang).avatarAria}
+            aria-haspopup="dialog"
+            onClick={() => setShowingProfile(true)}
+          >
+            {initials(wallet.email, address)}
+          </button>
+          <span className="wallet-label">{wallet.email ?? copy.label}</span>
+        </span>
         <button
           ref={receiveButton}
           type="button"
@@ -176,6 +193,15 @@ export function WalletWidget() {
       </div>
 
       {showingOrders ? <OrdersModal onClose={() => setShowingOrders(false)} /> : null}
+
+      {showingProfile ? (
+        <ProfileModal
+          onClose={() => {
+            setShowingProfile(false);
+            requestAnimationFrame(() => profileButton.current?.focus());
+          }}
+        />
+      ) : null}
 
       {receiving ? (
         <ReceiveModal

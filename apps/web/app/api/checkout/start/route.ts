@@ -7,9 +7,10 @@
  * basket. Only then does the sandbox start spending effort on it.
  *
  * `dia` is the shopper's Día login: the sandbox buys in their account, so the
- * order is theirs and goes to their address. It is passed to `startJob` and
- * dropped — never written to the checkout record, never logged. A password
- * in a cache with a 24 hour expiry is still a password in a cache.
+ * order is theirs and goes to their address. When the body has none, the
+ * saved profile is decrypted here instead. Either way it goes to `startJob`
+ * and is dropped — never written to the checkout record, never logged. A
+ * password in a cache with a 24 hour expiry is still a password in a cache.
  *
  * Idempotent: a second call for an order that already has a job returns the
  * same status rather than starting a second job.
@@ -17,6 +18,8 @@
 import { readOrder } from '../../../../lib/checkout/escrow-server.ts';
 import { startJob } from '../../../../lib/checkout/sandbox.ts';
 import { readShopper } from '../../../../lib/checkout/shopper.ts';
+import { sandboxFlags } from '../../../../lib/config.ts';
+import { getProfile } from '../../../../lib/profile.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
 import type { StatusResponse } from '../../../../lib/checkout/types.ts';
 import { readLoggedInUser } from '../../../../lib/login-gate.ts';
@@ -42,7 +45,17 @@ export async function POST(req: Request): Promise<Response> {
   if (!rec || rec.buyer !== user.address) return Response.json({ error: 'No encontramos ese pedido.' }, { status: 404 });
 
   if (!rec.jobId) {
-    const shopper = readShopper(body?.dia, body?.address, rec.postalCode);
+    // A login typed into the modal wins for this one checkout; otherwise the
+    // saved profile, decrypted here and nowhere else (lib/profile.ts).
+    let shopper = readShopper(body?.dia, body?.address, rec.postalCode);
+    if (!shopper) {
+      try {
+        shopper = readShopper(await getProfile(user.address), body?.address, rec.postalCode);
+      } catch (err) {
+        console.error('[checkout/start] profile', err instanceof Error ? err.name : 'read failed');
+        return Response.json({ error: 'No pudimos leer tu perfil. Probá de nuevo en un rato.' }, { status: 503 });
+      }
+    }
     if (!shopper) return Response.json({ error: 'Completá tu email, contraseña y DNI de Día.' }, { status: 400 });
     // A just-confirmed transaction can lag one RPC node behind another.
     let order = await readOrder(orderId);
@@ -64,6 +77,7 @@ export async function POST(req: Request): Promise<Response> {
         orderId,
         rec.lines.map((l) => ({ name: l.name, quantity: l.quantity, sku: l.skuId })),
         shopper,
+        await sandboxFlags(),
       );
     } catch (err) {
       // No job means nothing will settle it: the status poll refunds.

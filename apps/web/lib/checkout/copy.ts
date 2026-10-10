@@ -23,6 +23,10 @@ export interface EscrowCopy {
   numberLabel: string;
   phoneLabel: string;
   diaMissing: string;
+  profileUsing: (email: string) => string;
+  profileOther: string;
+  saveToProfile: string;
+  postalNote: (profile: string, chat: string) => string;
   escrowNote: string;
   balanceLabel: string;
   short: string;
@@ -71,6 +75,10 @@ const ES: EscrowCopy = {
   numberLabel: 'Número',
   phoneLabel: 'Teléfono',
   diaMissing: 'Completá email, contraseña y DNI de tu cuenta de Día.',
+  profileUsing: (email) => `Compramos con los datos de tu perfil${email ? ` (${email})` : ''}.`,
+  profileOther: 'Usar otros datos esta vez',
+  saveToProfile: 'Guardar en mi perfil para la próxima',
+  postalNote: (profile, chat) => `Enviamos a tu código postal ${profile}, el de tu perfil. Los precios del chat eran para ${chat}.`,
   escrowNote:
     'La plata queda en un escrow en Solana, no con nosotros. Si la compra no llega al pago, vuelve a tu billetera sola.',
   balanceLabel: 'Tu saldo',
@@ -128,6 +136,10 @@ const EN: EscrowCopy = {
   numberLabel: 'Number',
   phoneLabel: 'Phone',
   diaMissing: 'Fill in your Día email, password and DNI.',
+  profileUsing: (email) => `We'll buy with your profile details${email ? ` (${email})` : ''}.`,
+  profileOther: 'Use other details this time',
+  saveToProfile: 'Save to my profile for next time',
+  postalNote: (profile, chat) => `We deliver to ${profile}, your profile's postal code. Chat prices were for ${chat}.`,
   escrowNote:
     "The money sits in an escrow on Solana, not with us. If the purchase doesn't reach payment, it goes back to your wallet on its own.",
   balanceLabel: 'Your balance',

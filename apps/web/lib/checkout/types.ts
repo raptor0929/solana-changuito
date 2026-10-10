@@ -15,6 +15,11 @@ export interface QuoteResponse {
   subtotalCentavos: number;
   shippingCentavos: number;
   totalCentavos: number;
+  /** Where the envío was quoted and the sandbox will deliver: the profile's postcode when saved, else the chat's. */
+  postalCode: string;
+  postalSource: 'profile' | 'chat';
+  /** The chat's postcode, for the modal to say when the two differ. */
+  chatPostalCode: string | null;
   programId: string;
   usdcMint: string;
 }

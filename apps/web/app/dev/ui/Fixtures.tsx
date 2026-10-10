@@ -5,7 +5,10 @@ import { useState } from 'react';
 import { TurnProgressLine, UserBubble } from '../../../components/Chat';
 import { CheckoutModal } from '../../../components/CheckoutModal';
 import { FaucetConfirm } from '../../../components/FaucetConfirm';
+import { Modal } from '../../../components/Modal';
+import { ProfileForm } from '../../../components/ProfileModal';
 import { ReceiveModal } from '../../../components/ReceiveModal';
+import { initials, profileCopy } from '../../../lib/profile-copy';
 import type { ChatState } from '../../../lib/chat-state';
 import { ENOUGH_UNITS } from '../../../lib/faucet-policy';
 
@@ -79,6 +82,7 @@ export function Fixtures() {
   const [faucet, setFaucet] = useState<'empty' | 'full' | null>(null);
   const [checkout, setCheckout] = useState(false);
   const [receive, setReceive] = useState(false);
+  const [profile, setProfile] = useState(false);
 
   return (
     <>
@@ -131,6 +135,30 @@ export function Fixtures() {
         </button>
       </div>
       {receive ? <ReceiveModal address={DEMO_ADDRESS} onClose={() => setReceive(false)} /> : null}
+
+      {/* The profile form alone: the real dialog fetches /api/profile, which
+          needs a session. The save is faked and echoes back without the
+          password, as the server does. */}
+      <div className="cart-actions">
+        <button type="button" className="avatar" data-testid="fixture-profile" onClick={() => setProfile(true)}>
+          {initials('ana.perez@gmail.com', DEMO_ADDRESS)}
+        </button>
+      </div>
+      {profile ? (
+        <Modal title={profileCopy('es').title} onClose={() => setProfile(false)} className="modal-orders" testId="fixture-profile-modal">
+          <ProfileForm
+            copy={profileCopy('es')}
+            profile={{ email: 'ana.perez@gmail.com', dni: '30123456', postcode: '1425', hasPassword: true, complete: true }}
+            onSave={async (p) => ({
+              email: p.email || null,
+              dni: p.dni || null,
+              postcode: p.postcode || null,
+              hasPassword: true,
+              complete: true,
+            })}
+          />
+        </Modal>
+      ) : null}
 
       <button
         type="button"
