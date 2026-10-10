@@ -1,3 +1,8 @@
+> **This is the upstream README, kept for credit.** Here the sandbox no longer
+> uses Playwright: login runs on a CDP layer (`cdp.py`, `sandbox.py`), the cart
+> is filled through the store's API, and checkout runs on Jev Ultrafast. See
+> [README.md](README.md).
+
 # Jev on Dia Argentina: login → cart → checkout (stops before card details)
 
 Jev (TypeSafe's System One model) drives a sandboxed Playwright browser on

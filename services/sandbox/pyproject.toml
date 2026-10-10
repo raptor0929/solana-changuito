@@ -1,11 +1,13 @@
 [project]
 name = "changuito-sandbox"
 version = "0.1.0"
-description = "Jev + Playwright shopping sandbox for changuito (from raptor0929/jev-dia-arg)"
+description = "Jev + Jev Ultrafast shopping sandbox for changuito (from raptor0929/jev-dia-arg)"
 requires-python = ">=3.12"
 dependencies = [
-    "playwright>=1.63.0",
+    # Checkout driver. GitHub-only (no PyPI release), so it is pinned to one reviewed commit.
+    "jev-ultrafast @ git+https://github.com/browser-use/jev-ultrafast@1231850a0bf1a0c0341fe408ef1668dbbfdfac46",
     "typesafe-sdk>=0.7.2",
+    "websockets>=13",
     "fastapi>=0.115",
     "uvicorn>=0.30",
 ]

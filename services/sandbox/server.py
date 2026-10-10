@@ -9,7 +9,8 @@ lib/checkout/sandbox.ts) starts a job after the shopper's USDC is locked in
 the escrow, polls it, and settles or refunds on the result.
 
 One job at a time, on purpose: there is one Día account and its cart is tied
-to its session, so two concurrent runs would empty and fill the same cart.
+to its session, so two concurrent runs would empty and fill the same cart. It
+also keeps one Chromium on one debugging port (cdp.py).
 Jobs live in memory. A restart loses them, and the app reads a 404 for a job
 it started as a failure and refunds — the safe direction.
 """
@@ -74,10 +75,9 @@ async def worker() -> None:
             job["phase"] = name
 
         try:
-            # The harness searches by text and adds one unit per line; the
-            # quantity is recorded on the job, not yet applied (docs/sandbox.md).
-            terms = [i["name"] for i in job["items"]]
-            out = await run_job(terms, on_phase=on_phase)
+            # Lines with a SKU are added by id with their quantity; a line without one is
+            # searched by name (agent.py).
+            out = await run_job(job["items"], on_phase=on_phase)
             job.update(status=out["status"], phase=out["phase"], result=out, error=out.get("error"))
         except Exception as e:  # noqa: BLE001 — a crashed run is a failed job, never a dead worker
             traceback.print_exc()
