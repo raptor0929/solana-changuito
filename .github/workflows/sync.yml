@@ -6,18 +6,35 @@
 # was needed first, labeled `shared`, and on merge this workflow:
 #
 #   1. clones the sibling repo,
-#   2. cherry-picks the merged change onto its main with `-x`, so the commit
-#      names the hash it came from,
-#   3. pushes it as `sync/<this repo>-<PR number>`,
-#   4. opens a pull request there, titled `sync: <original title>`.
+#   2. applies the merged change onto its main as one commit, authored by the
+#      original author, with the source PR's title as its message,
+#   3. pushes it as `sync/<source branch>`,
+#   4. opens a pull request there with the source PR's title and body, labeled
+#      `chain-only` (the sibling already has it, so it must not come back),
+#   5. comments on the source PR with the number it became.
 #
 # A human reviews and merges that PR, same as any other. The original author
-# stays the author of the cherry-picked commit; the bot is only the committer.
+# stays the author of the commit; the bot is only the committer.
 #
-# If the cherry-pick conflicts, no half-applied branch is pushed. An issue is
-# opened in the sibling repo instead with the exact commands to do it by hand,
-# because a conflict is a decision and the right person to make it is
+# If the change conflicts, no half-applied branch is pushed. An issue is opened
+# in the sibling instead, and the commands to do it by hand go on the source
+# PR, because a conflict is a decision and the right person to make it is
 # whoever owns that repo.
+#
+# ## What the sibling sees
+#
+# Each repo is judged on its own, so nothing this workflow writes into the
+# sibling names the source repo: not the branch, title, body, commit message or
+# issue. The source repo's name, URL, PR number and merge hash stay out of
+# them, and so does `cherry-pick -x`. Where a change came from is recorded on
+# the *source* PR instead, and only inside a code span: a plain `org/repo#N`
+# or URL there would put a "mentioned this" entry on the sibling PR's public
+# timeline, which is the very link this avoids.
+#
+# A PR body is free text, so it can name the source repo itself. When it does,
+# the sibling PR gets a neutral body instead, and the run says so. Commit
+# messages get the same check. Write shared PR descriptions without naming
+# either chain.
 #
 # ## Why a PAT
 #
@@ -25,8 +42,9 @@
 # it opens would not trigger the sibling's own CI. `SYNC_TOKEN` is a
 # fine-grained personal access token with **Contents: read and write** and
 # **Pull requests: read and write** (also **Issues: read and write**, for the
-# conflict path) on both repos, stored as a repository secret in both. Rotate
-# it like any other credential; it can push to main of both repos.
+# conflict path and the source-PR comment) on both repos, stored as a
+# repository secret in both. Rotate it like any other credential; it can push
+# to main of both repos.
 #
 # ## Merge method
 #
@@ -36,9 +54,9 @@
 #
 # ## Loop guard
 #
-# The PR opened here is never labeled `shared`, and a PR whose branch starts
-# with `sync/` is skipped even if somebody adds the label by hand. Either one
-# alone would prevent a ping-pong; both are cheap.
+# The PR opened in the sibling is labeled `chain-only`, never `shared`, and a
+# PR whose branch starts with `sync/` is skipped even if somebody adds the
+# label by hand. Either one alone would prevent a ping-pong; both are cheap.
 name: Sync shared change
 
 on:
@@ -50,7 +68,7 @@ permissions:
 
 jobs:
   sync:
-    name: cherry-pick into the sibling repo
+    name: carry into the sibling repo
     if: >-
       github.event.pull_request.merged == true &&
       contains(github.event.pull_request.labels.*.name, 'shared') &&
@@ -63,8 +81,7 @@ jobs:
       SOURCE: ${{ github.event.repository.name }}
       PR: ${{ github.event.pull_request.number }}
       PR_TITLE: ${{ github.event.pull_request.title }}
-      PR_URL: ${{ github.event.pull_request.html_url }}
-      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
       MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
     steps:
       - name: Name the sibling
@@ -95,44 +112,66 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch --quiet "https://x-access-token:${GH_TOKEN}@github.com/${OWNER}/${SOURCE}.git" "$MERGE_SHA"
 
-      - name: Cherry-pick
+      # The title and branch are user text and reach the shell only as
+      # variables, never inside a heredoc or a format string, so a title
+      # containing `$(…)` is a title and nothing else.
+      - name: Apply the change
         id: pick
         working-directory: sibling
         env:
           SIBLING: ${{ steps.sibling.outputs.name }}
         run: |
           set -euo pipefail
-          branch="sync/${SOURCE}-${PR}"
+          # The source branch, minus any prefix, makes the name: `shared/x`
+          # becomes `sync/x`. Neither the source repo nor its PR number.
+          slug=$(printf '%s' "${HEAD_REF##*/}" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-60)
+          branch="sync/${slug}"
           git checkout --quiet -b "$branch" origin/main
 
-          # A merge commit has two parents and is picked against the first;
-          # a squash commit has one and is picked as it is.
+          # A merge commit has two parents and is applied against the first,
+          # and its author is the merger; the PR's own tip carries the real
+          # author. A squash commit has one parent and is both.
           parents=$(git rev-list --parents -n 1 "$MERGE_SHA" | wc -w)
-          if [ "$parents" -ge 3 ]; then pick_args="-m 1"; else pick_args=""; fi
+          if [ "$parents" -ge 3 ]; then
+            pick_args="-m 1"; author_of="${MERGE_SHA}^2"
+          else
+            pick_args=""; author_of="$MERGE_SHA"
+          fi
+          author=$(git log -1 --format='%an <%ae>' "$author_of")
 
-          if ! git cherry-pick -x $pick_args "$MERGE_SHA"; then
-            # Two ways to fail: files in conflict, or nothing left to apply
-            # because main already has it. Only the first needs a human.
-            if git diff --name-only --diff-filter=U | grep -q .; then
-              git cherry-pick --abort || true
-              echo "outcome=conflict" >> "$GITHUB_OUTPUT"
-              echo "::warning::Cherry-pick of $MERGE_SHA conflicts with $SIBLING/main; opening an issue instead of a PR."
-            else
-              git cherry-pick --quit || true
-              echo "outcome=empty" >> "$GITHUB_OUTPUT"
-              echo "Nothing to sync: $SIBLING/main already contains this change."
-            fi
+          if ! git cherry-pick --no-commit $pick_args "$MERGE_SHA"; then
+            git cherry-pick --abort 2>/dev/null || git reset --quiet --hard
+            echo "outcome=conflict" >> "$GITHUB_OUTPUT"
+            echo "::warning::$MERGE_SHA conflicts with $SIBLING/main; opening an issue instead of a PR."
             exit 0
           fi
+          if git diff --cached --quiet; then
+            echo "outcome=empty" >> "$GITHUB_OUTPUT"
+            echo "Nothing to sync: $SIBLING/main already contains this change."
+            exit 0
+          fi
+
+          # Message: the PR title without GitHub's "(#N)" suffix, which would
+          # point at an unrelated PR in the sibling. For a merge commit, the
+          # PR's own commit messages follow, unless one names the source repo.
+          subject=$(printf '%s' "$PR_TITLE" | sed -E 's/ \(#[0-9]+\)$//')
+          printf '%s\n' "$subject" > "$RUNNER_TEMP/msg.txt"
+          if [ "$parents" -ge 3 ]; then
+            git log --reverse --format='%B' "${MERGE_SHA}^1..${MERGE_SHA}^2" > "$RUNNER_TEMP/log.txt"
+            if grep -qiw -- "$SOURCE" "$RUNNER_TEMP/log.txt"; then
+              echo "::warning::A commit message names '$SOURCE'; the sibling commit carries the PR title only."
+            else
+              { printf '\n'; cat "$RUNNER_TEMP/log.txt"; } >> "$RUNNER_TEMP/msg.txt"
+            fi
+          fi
+          git commit --quiet --author "$author" -F "$RUNNER_TEMP/msg.txt"
 
           echo "outcome=pushed" >> "$GITHUB_OUTPUT"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           git push --quiet --force origin "$branch"
 
-      # The PR title and body are user text and reach the shell only as
-      # variables passed to printf's %s, never inside a heredoc or a format
-      # string, so a title containing `$(…)` is a title and nothing else.
       - name: Open the pull request
+        id: open
         if: steps.pick.outputs.outcome == 'pushed'
         working-directory: sibling
         env:
@@ -141,40 +180,65 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
-          {
-            printf 'Synced from %s/%s#%s (%s), merged as `%s`, by @%s.\n\n' \
-              "$OWNER" "$SOURCE" "$PR" "$PR_URL" "$MERGE_SHA" "$PR_AUTHOR"
-            printf '%s\n\n---\n\n' 'Review it as you would any other change to the shared code. The cherry-pick carries the original author and message; the commit body names the source hash.'
-            printf '%s\n' "$PR_BODY"
-          } > "$RUNNER_TEMP/body.md"
+          title=$(printf '%s' "$PR_TITLE" | sed -E 's/ \(#[0-9]+\)$//')
+          if printf '%s\n%s' "$title" "$PR_BODY" | grep -qiw -- "$SOURCE"; then
+            echo "::warning::The PR title or body names '$SOURCE'; the sibling PR gets a neutral body."
+            printf '%s\n' 'A change to the shared code. Review it as you would any other; the commit carries the original author.' > "$RUNNER_TEMP/body.md"
+          else
+            printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/body.md"
+          fi
           existing=$(gh pr list --repo "${OWNER}/${SIBLING}" --head "$BRANCH" --state open --json number --jq '.[0].number')
           if [ -n "$existing" ]; then
             echo "PR #$existing already open for $BRANCH; branch updated."
-            gh pr comment "$existing" --repo "${OWNER}/${SIBLING}" \
-              --body "Branch force-pushed with the latest cherry-pick of \`${MERGE_SHA}\`."
+            gh pr comment "$existing" --repo "${OWNER}/${SIBLING}" --body "Branch updated with a newer version of this change."
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
           else
-            gh pr create --repo "${OWNER}/${SIBLING}" \
-              --base main --head "$BRANCH" \
-              --title "sync: ${PR_TITLE}" \
-              --body-file "$RUNNER_TEMP/body.md"
+            url=$(gh pr create --repo "${OWNER}/${SIBLING}" \
+              --base main --head "$BRANCH" --label chain-only \
+              --title "$title" --body-file "$RUNNER_TEMP/body.md")
+            echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Open an issue for the conflict
+      # Inside backticks, so GitHub does not turn it into a cross-reference on
+      # the sibling PR's timeline (see "What the sibling sees").
+      - name: Record it on the source PR
+        if: steps.open.outputs.number != ''
+        env:
+          SIBLING: ${{ steps.sibling.outputs.name }}
+          NUMBER: ${{ steps.open.outputs.number }}
+        run: |
+          set -euo pipefail
+          printf 'Carried to the sibling repo as `%s/%s#%s` (labelled chain-only there). Merge it the same day.\n' \
+            "$OWNER" "$SIBLING" "$NUMBER" > "$RUNNER_TEMP/note.md"
+          gh pr comment "$PR" --repo "${OWNER}/${SOURCE}" --body-file "$RUNNER_TEMP/note.md"
+
+      - name: Report the conflict
         if: steps.pick.outputs.outcome == 'conflict'
         env:
           SIBLING: ${{ steps.sibling.outputs.name }}
         run: |
           set -euo pipefail
+          title=$(printf '%s' "$PR_TITLE" | sed -E 's/ \(#[0-9]+\)$//')
+          slug=$(printf '%s' "${HEAD_REF##*/}" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-60)
+
+          # The sibling's issue says only that a shared change needs a hand
+          # merge. The commands, which have to name the source, go on the
+          # source PR, in a code block, where they link nothing.
+          printf '%s\n\n%s\n' \
+            "A change to the shared code does not apply cleanly to main and needs a manual merge." \
+            'Whoever resolves it: open the PR from a `sync/` branch and label it `chain-only`.' > "$RUNNER_TEMP/issue.md"
+          issue=$(gh issue create --repo "${OWNER}/${SIBLING}" \
+            --title "Manual merge needed: ${title}" --body-file "$RUNNER_TEMP/issue.md")
+
           {
-            printf '%s/%s#%s (%s) is labeled `shared` and merged as `%s`, but it does not cherry-pick cleanly onto this repo'"'"'s main.\n\nTo bring it over by hand:\n\n```sh\n' \
-              "$OWNER" "$SOURCE" "$PR" "$PR_URL" "$MERGE_SHA"
-            printf 'git fetch origin && git checkout -b sync/%s-%s origin/main\n' "$SOURCE" "$PR"
+            printf 'This does not apply cleanly to the sibling repo. Tracked there as `%s/%s#%s`.\n\n' "$OWNER" "$SIBLING" "${issue##*/}"
+            printf 'In a clone of the sibling:\n\n```sh\n'
+            printf 'git fetch origin && git checkout -b sync/%s origin/main\n' "$slug"
             printf 'git fetch https://github.com/%s/%s.git %s\n' "$OWNER" "$SOURCE" "$MERGE_SHA"
-            printf 'git cherry-pick -x %s        # add -m 1 if it is a merge commit\n' "$MERGE_SHA"
-            printf '# resolve, then:\ngit push -u origin sync/%s-%s\n' "$SOURCE" "$PR"
-            printf 'gh pr create --title "sync: %s" --body "Manual cherry-pick of %s/%s#%s"\n```\n\n' "$PR_TITLE" "$OWNER" "$SOURCE" "$PR"
-            printf '%s\n' 'Until this lands, the shared code in the two repos differs.'
-          } > "$RUNNER_TEMP/issue.md"
-          gh issue create --repo "${OWNER}/${SIBLING}" \
-            --title "sync conflict: ${PR_TITLE} (${SOURCE}#${PR})" \
-            --body-file "$RUNNER_TEMP/issue.md"
+            printf 'git cherry-pick --no-commit %s        # add -m 1 if it is a merge commit\n' "$MERGE_SHA"
+            printf '# resolve, then commit as the original author, without naming this repo:\n'
+            printf 'git commit --author "<author>" -m "%s"\n' "$title"
+            printf 'git push -u origin sync/%s\n' "$slug"
+            printf 'gh pr create --label chain-only --title "%s" --body "Closes #%s"\n```\n' "$title" "${issue##*/}"
+          } > "$RUNNER_TEMP/note.md"
+          gh pr comment "$PR" --repo "${OWNER}/${SOURCE}" --body-file "$RUNNER_TEMP/note.md"
