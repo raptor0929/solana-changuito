@@ -172,7 +172,8 @@ class Sandbox:
     # ---- lifecycle -------------------------------------------------------------------------
 
     async def start(self) -> None:
-        self.chromium = Chromium(headed=self.headed, port=int(os.environ.get("CHROME_DEBUG_PORT", "9222")))
+        self.chromium = Chromium(headed=self.headed, port=int(os.environ.get("CHROME_DEBUG_PORT", "9222")),
+                                 user_agent=UA)
         self.chromium.start()
         self.cdp = CDP()
         await self.cdp.connect(self.chromium.ws_url)
@@ -426,6 +427,21 @@ class Sandbox:
             if i < int(seconds / 2) - 1:
                 await asyncio.sleep(2)
         return False
+
+    async def where(self) -> list[str]:
+        """Each open page as host + path, never the query (login redirects carry tokens there)."""
+        out = []
+        for target in list(self.pages):
+            try:
+                loc = await self.evaluate(
+                    "[location.host, location.pathname, document.title, "
+                    "!!document.querySelector('#main-frame-error, .neterror, #sub-frame-error')]", target, timeout=3)
+                host, path, title, neterror = loc
+                out.append(f"{'POPUP ' if target != self.main_target else ''}{host}{path}"
+                           f"{'  [browser error page: ' + title + ']' if neterror else ''}")
+            except (CDPError, asyncio.TimeoutError):
+                out.append("(page not readable)")
+        return out
 
     async def open_cart(self) -> None:
         await self.goto(f"{BASE}/checkout/#/cart")

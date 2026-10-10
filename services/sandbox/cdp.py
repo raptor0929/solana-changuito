@@ -110,6 +110,7 @@ class Chromium:
 
     headed: bool = False
     port: int = 9222
+    user_agent: str = ""
     proc: subprocess.Popen | None = None
     profile: str | None = None
     ws_url: str = ""
@@ -125,6 +126,10 @@ class Chromium:
             "--disable-background-networking", "--disable-sync", "--disable-extensions",
             "--lang=es-AR", "--window-size=1366,900",
         ]
+        if self.user_agent:
+            # Browser-wide, so the login popup and Ultrafast's tab carry it too. A per-page override
+            # leaves every other target announcing HeadlessChrome, which login services turn away.
+            args.append(f"--user-agent={self.user_agent}")
         if not self.headed:
             args.append("--headless=new")
         if os.geteuid() == 0:

@@ -162,6 +162,8 @@ async def run_job(items: list[dict] | list[str], *, headed: bool = False, model:
         log(f"\n— summary —\nresult: {'reached payment' if reached else error}   phase: {phase}   wall {wall} s   "
             f"timings {timings}\nsandbox: {len(sb.blocked_requests)} off-allowlist requests aborted; "
             f"order-placement requests blocked: {len(sb.order_attempts)}")
+        if sb.blocked_requests:
+            log(f"blocked hosts: {', '.join(sorted(set(sb.blocked_requests)))}")
         return {
             "status": "done" if reached else "failed",
             "phase": "payment" if reached else phase,
@@ -190,6 +192,8 @@ async def run_job(items: list[dict] | list[str], *, headed: bool = False, model:
         if latencies:
             log(f"jev: {len(latencies)} calls, median {statistics.median(latencies):.0f} ms")
         if not ok:
+            for page in await sb.where():
+                log(f"open page: {page}")
             return result(False, error, await sb.order_form())
 
         enter("empty_cart")
