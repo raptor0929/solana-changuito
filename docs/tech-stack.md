@@ -239,8 +239,6 @@ in `apps/web/.env.example`; setup in [`../DEPLOY.md`](../DEPLOY.md).
 |---|---|---|
 | `SANDBOX_TOKEN` | yes | Bearer auth on `/jobs`. Unset, `/jobs` answers 503 |
 | `TYPESAFE_API_KEY` | yes | Jev |
-| `DIA_ARG_EMAIL`, `DIA_ARG_PWD`, `DIA_ARG_DNI` | yes | the operator's Día account. Typed by the harness from the environment and redacted from everything Jev sees |
-| `DIA_ARG_POSTCODE` | yes | the delivery postcode checkout asks for |
 | `PORT` | no | set by Railway; the image defaults to 8080 |
 
 There is **no network or mode variable, and there must not be one.** Devnet is

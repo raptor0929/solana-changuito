@@ -259,7 +259,7 @@ the card are deterministic (`checkout.py`). The dialog shows each phase:
 
 It logs into **the shopper's** Día account with the login they typed in the
 modal (passed through, never stored) and pays with **the operator's** card,
-pressing Pay only when `CARD_*` is configured; until the card is typed the
+pressing Pay only when the job carries the `shared_card` row; until the card is typed the
 order and payment endpoints stay aborted at the network level. Jev is never
 offered a "comprar / confirmar / pagar" control. One job at a time: one
 browser, one card.

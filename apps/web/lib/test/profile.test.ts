@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { isComplete, mergeProfile, ProfileInputError, publicProfile } from '../profile.ts';
 import { initials } from '../profile-copy.ts';
+import { cardKind } from '../shared-card.ts';
 
 const SAVED = { email: 'ana@b.com', password: 'secret', dni: '30123456', postcode: '1425' };
 
@@ -39,5 +40,15 @@ describe('the profile', () => {
     assert.equal(initials('ana.perez@gmail.com', null), 'AP');
     assert.equal(initials('juan@x.com', null), 'JU');
     assert.equal(initials(null, 'Bx9kWallet'), 'BX');
+  });
+});
+
+describe('the shared card', () => {
+  it('is debit unless its brand says credit', () => {
+    assert.equal(cardKind('Visa Débito'), 'debit');
+    assert.equal(cardKind('Mastercard'), 'debit');
+    assert.equal(cardKind(null), 'debit');
+    assert.equal(cardKind('Visa Crédito'), 'credit');
+    assert.equal(cardKind('Amex credit'), 'credit');
   });
 });

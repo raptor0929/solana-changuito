@@ -1,6 +1,6 @@
 """changuito's sandbox job API around agent.run_job.
 
-    POST /jobs        {order_id, items: [{name, quantity, sku?}], shopper?}  -> {job_id}
+    POST /jobs        {order_id, items: [{name, quantity, sku?}], shopper, card?}  -> {job_id}
     GET  /jobs/{id}   -> {job_id, status, phase, result?, error?}
     GET  /health      -> {ok, busy, queued}
 
@@ -10,10 +10,12 @@ the escrow, polls it, and settles or refunds on the result.
 
 `shopper` is the shopper's Día login ({email, password, dni}) plus where to
 deliver if their account has no saved address ({postcode, street, number,
-phone, complement}). It lives on the in-memory job until the run ends and is
-then deleted; `GET /jobs/{id}` never returns it and nothing logs it. Without
-`shopper` the run uses the operator's DIA_ARG_* account, which is for local
-testing.
+phone, complement}), from their encrypted profile in the web app. `card` is
+the card to pay with ({pan, cvv, exp_month, exp_year, holder, kind}), from the
+web app's `shared_card` row; without it the run stops at the payment step.
+Both live on the in-memory job until the run ends and are then deleted;
+`GET /jobs/{id}` never returns them and nothing logs them. Nothing here reads a
+login or a card from the environment.
 
 One job at a time, on purpose: one browser, one card, and a cart tied to a
 session. Jobs live in memory. A restart loses them, and the app reads a 404
@@ -31,7 +33,9 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent import run_job
 
@@ -51,6 +55,9 @@ class Item(BaseModel):
 
 
 class Shopper(BaseModel):
+    # A 422 must not echo what was sent: for these two models that is a password or a card number.
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=128, repr=False)
     dni: str = Field(pattern=r"^\d{7,9}$")
@@ -66,10 +73,30 @@ class Shopper(BaseModel):
     __str__ = __repr__
 
 
+class Card(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    pan: str = Field(pattern=r"^\d{13,19}$", repr=False)
+    cvv: str = Field(pattern=r"^\d{3,4}$", repr=False)
+    exp_month: str = Field(pattern=r"^(0?[1-9]|1[0-2])$", repr=False)
+    exp_year: str = Field(pattern=r"^(\d{2}|\d{4})$", repr=False)
+    holder: str = Field(min_length=1, max_length=80, repr=False)
+    kind: Literal["debit", "credit"] = "debit"
+
+    def __repr__(self) -> str:  # never print a card, even in a traceback
+        return "Card(<redacted>)"
+
+    __str__ = __repr__
+
+
 class JobIn(BaseModel):
+    # Errors in the nested shopper or card are raised from here, so the setting has to be here too.
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     order_id: str = Field(min_length=8, max_length=128)
     items: list[Item] = Field(min_length=1, max_length=MAX_ITEMS)
-    shopper: Shopper | None = None
+    shopper: Shopper
+    card: Card | None = None
 
 
 def auth(authorization: str = Header(default="")) -> None:
@@ -99,13 +126,15 @@ async def worker() -> None:
         try:
             # Lines with a SKU go into the cart through VTEX's API at their quantity;
             # the rest are searched for by name.
-            out = await run_job(job["items"], secrets=job.pop("shopper", None), on_phase=on_phase)
+            out = await run_job(job["items"], secrets=job.pop("shopper", None), card=job.pop("card", None),
+                                on_phase=on_phase)
             job.update(status=out["status"], phase=out["phase"], result=out, error=out.get("error"))
         except Exception as e:  # noqa: BLE001 — a crashed run is a failed job, never a dead worker
             traceback.print_exc()
             job.update(status="failed", error=f"{type(e).__name__}: {e}"[:300])
         finally:
             job.pop("shopper", None)  # gone however the run ended
+            job.pop("card", None)
             job["finished"] = time.time()
             busy = False
             for old in [k for k, v in jobs.items() if v.get("finished", time.time()) < time.time() - KEEP_S]:
@@ -136,7 +165,8 @@ async def create(body: JobIn) -> dict:
     job_id = uuid.uuid4().hex
     jobs[job_id] = {"job_id": job_id, "order_id": body.order_id, "status": "queued", "phase": "queued",
                     "items": [i.model_dump() for i in body.items], "created": time.time(),
-                    "shopper": body.shopper.model_dump(exclude_none=True) if body.shopper else None}
+                    "shopper": body.shopper.model_dump(exclude_none=True),
+                    "card": body.card.model_dump() if body.card else None}
     await queue.put(job_id)
     return {"job_id": job_id}
 

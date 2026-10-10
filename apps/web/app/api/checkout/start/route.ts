@@ -20,6 +20,7 @@ import { startJob } from '../../../../lib/checkout/sandbox.ts';
 import { readShopper } from '../../../../lib/checkout/shopper.ts';
 import { sandboxFlags } from '../../../../lib/config.ts';
 import { getProfile } from '../../../../lib/profile.ts';
+import { checkoutCard } from '../../../../lib/shared-card.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
 import type { StatusResponse } from '../../../../lib/checkout/types.ts';
 import { readLoggedInUser } from '../../../../lib/login-gate.ts';
@@ -73,10 +74,25 @@ export async function POST(req: Request): Promise<Response> {
 
     rec.openSig = typeof body?.openSig === 'string' ? body.openSig : rec.openSig;
     try {
+      // The operator's card, from shared_card. None means the run stops at
+      // the payment step and refunds; a failed read is the same, not a 500.
+      const card = await checkoutCard().catch((err) => {
+        console.error('[checkout/start] card', err instanceof Error ? err.name : 'read failed');
+        return undefined;
+      });
+      if (card) console.log('[checkout/start] paying with the shared card on', card.network);
       rec.jobId = await startJob(
         orderId,
         rec.lines.map((l) => ({ name: l.name, quantity: l.quantity, sku: l.skuId })),
         shopper,
+        card && {
+          pan: card.pan,
+          cvv: card.cvv,
+          exp_month: card.exp_month,
+          exp_year: card.exp_year,
+          holder: card.holder,
+          kind: card.kind,
+        },
         await sandboxFlags(),
       );
     } catch (err) {

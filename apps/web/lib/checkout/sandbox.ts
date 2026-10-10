@@ -6,9 +6,11 @@
  *   POST {SANDBOX_URL}/jobs        { order_id, items, shopper }   -> { job_id }
  *   GET  {SANDBOX_URL}/jobs/{id}                                  -> SandboxJob
  *
- * `shopper` carries the shopper's Día login. It goes from the start route
- * straight into this request body and nowhere else: not the checkout record,
- * not a log line. The sandbox holds it in memory for the run and drops it.
+ * `shopper` carries the shopper's Día login and `card` the operator's card
+ * (lib/shared-card.ts). Both go from the start route straight into this
+ * request body and nowhere else: not the checkout record, not a log line.
+ * The sandbox holds them in memory for the run and drops them. A job with no
+ * card stops at the payment step and the order refunds.
  *
  * The mock is switched in the `config` table (lib/config.ts), not the
  * environment: `npm run config -- set sandbox_mock true` makes every new
@@ -61,6 +63,16 @@ export interface SandboxItem {
   sku: string;
 }
 
+/** The card to pay with, as the sandbox's `Card` model takes it. Never logged; see the header. */
+export interface SandboxCard {
+  pan: string;
+  cvv: string;
+  exp_month: string;
+  exp_year: string;
+  holder: string;
+  kind: 'debit' | 'credit';
+}
+
 /** The shopper's Día login and where to deliver. Never stored; see the header. */
 export interface SandboxShopper {
   email: string;
@@ -94,6 +106,7 @@ export async function startJob(
   orderId: string,
   items: SandboxItem[],
   shopper: SandboxShopper,
+  card: SandboxCard | undefined,
   flags: MockFlags,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
@@ -107,7 +120,7 @@ export async function startJob(
   const res = await fetch(`${base}/jobs`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ order_id: orderId, items, shopper }),
+    body: JSON.stringify({ order_id: orderId, items, shopper, ...(card ? { card } : {}) }),
   });
   if (!res.ok) throw new Error(`sandbox answered ${res.status}`);
   const body = (await res.json()) as { job_id?: string };

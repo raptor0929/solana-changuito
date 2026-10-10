@@ -197,8 +197,6 @@ one operator Día account and runs one job at a time. Details in
 |---|---|
 | `SANDBOX_TOKEN` | `openssl rand -hex 32`. Unset, `/jobs` answers 503 |
 | `TYPESAFE_API_KEY` | TypeSafe API key, for Jev |
-| `DIA_ARG_EMAIL`, `DIA_ARG_PWD`, `DIA_ARG_DNI` | the operator's Día account. Typed from the environment and redacted from everything the model sees |
-| `DIA_ARG_POSTCODE` | the delivery postcode checkout asks for |
 | `PORT` | leave it; Railway sets it and the image defaults to 8080 |
 
 ### 2.3 Expose it and connect the app

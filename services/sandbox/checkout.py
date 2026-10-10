@@ -6,15 +6,14 @@ address and delivery window are attached through the same API, and the card form
 label. Each function reports what it could not do, and agent.py hands only that to Jev.
 
 Card rule, the one that matters: nothing here ever logs, returns or raises a card value. A log
-line says which FIELD was filled, never with what. The card is read from CARD_* at the moment it
-is typed, and Pay is pressed only when CARD_PAN is set; until then the order endpoints stay
+line says which FIELD was filled, never with what. The card comes in the job (the web app reads
+it from the `shared_card` table), and Pay is pressed only when the job has one; until then the order endpoints stay
 aborted at the network layer (sandbox.ORDER_ENDPOINTS).
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 
 from urllib.parse import urlsplit
@@ -202,7 +201,7 @@ async def open_payment(sb: Sandbox) -> bool:
 # Selectors ported from packages/mcp/src/checkout/selectors.ts: label first, CSS last,
 # fallback chains rather than single guesses.
 
-# Which card group to pay with. The operator's card is a debit card; CARD_KIND=credit switches.
+# Which card group to pay with: the job card's `kind` (debit unless its brand says credit).
 GROUPS = {
     "debit": ("#payment-group-debitCardPaymentGroup", "debitCardPaymentGroup",
               re.compile(r"tarjeta de d[eé]bito|debit card", re.I),
@@ -213,8 +212,6 @@ GROUPS = {
 }
 
 
-def card_kind() -> str:
-    return "credit" if (os.environ.get("CARD_KIND") or "").strip().lower() == "credit" else "debit"
 
 CARD_FIELDS = {
     "pan": (re.compile(r"n[uú]mero de (la )?tarjeta|card ?number", re.I),
@@ -242,17 +239,19 @@ ALERTS_JS = r"""() => [...document.querySelectorAll('[role=alert], .alert, .erro
   .filter(e => { const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1; })
   .map(e => (e.innerText || '').replace(/\s+/g, ' ').trim()).filter(t => t.length > 3 && t.length < 400).slice(0, 8)"""
 
-CARD_ENV = {"pan": "CARD_PAN", "month": "CARD_EXPIRY_MONTH", "year": "CARD_EXPIRY_YEAR",
-            "cvv": "CARD_CVV", "holder": "CARD_NAME"}
-
-
-def card_from_env() -> dict | None:
-    card = {k: (os.environ.get(env) or "").strip() for k, env in CARD_ENV.items()}
-    if not all(card.values()):
+def normalize_card(job_card: dict | None) -> dict | None:
+    """The job's card (server.py `Card`, from the web app's `shared_card` row) in the shape the
+    form filler uses. None unless every field is there: a half card is no card."""
+    if not job_card:
         return None
-    card["pan"] = re.sub(r"\D", "", card["pan"])
-    card["dni"] = re.sub(r"\D", "", os.environ.get("CARD_DNI") or "")
-    card["month"] = card["month"].zfill(2)
+    card = {"pan": re.sub(r"\D", "", str(job_card.get("pan") or "")),
+            "cvv": str(job_card.get("cvv") or "").strip(),
+            "month": str(job_card.get("exp_month") or "").strip().zfill(2),
+            "year": str(job_card.get("exp_year") or "").strip(),
+            "holder": str(job_card.get("holder") or "").strip(),
+            "kind": "credit" if job_card.get("kind") == "credit" else "debit"}
+    if not all(card[k] for k in ("pan", "cvv", "month", "year", "holder")):
+        return None
     if len(card["year"]) == 2:
         card["year"] = "20" + card["year"]
     return card
@@ -301,19 +300,19 @@ async def _find(root: Page | Frame, key: str, timeout: int = 400) -> Locator | N
     return found
 
 
-def _card_frames(page: Page) -> list[Frame]:
+def _card_frames(page: Page, kind: str = "debit") -> list[Frame]:
     """Only the iframe of the card group we pay with (VTEX renders one per group), then the page.
     Typing into the other group's hidden iframe would fill a form nobody submits."""
-    group = GROUPS[card_kind()][1]
+    group = GROUPS[kind][1]
     frames = [f for f in page.frames if f is not page.main_frame and group in (f.url or "")]
     return [*frames, page.main_frame]
 
 
-async def _card_root(page: Page, timeout: int = 400) -> Page | Frame | None:
+async def _card_root(page: Page, timeout: int = 400, kind: str = "debit") -> Page | Frame | None:
     """The page or iframe holding the card number. On Día it is VTEX's card-ui iframe."""
     waited = 0
     while True:
-        for frame in _card_frames(page):
+        for frame in _card_frames(page, kind):
             if await _first_visible(_cands(frame, "pan")):
                 return frame
         if waited >= timeout:
@@ -326,10 +325,11 @@ NEW_CARD = re.compile(r"(usar|pagar con|agregar|ingresar|nueva|otra) (otra |una 
                       r"new card|another card", re.I)
 
 
-async def _use_new_card(page: Page) -> bool:
+async def _use_new_card(page: Page, kind: str) -> bool:
     """A Día account with saved cards shows them as radios and only asks for a CVV. The card we pay
-    with is always CARD_*, never one saved in somebody's account, so ask for the new-card form."""
-    for frame in _card_frames(page):
+    with is always the job's (the operator's shared card), never one saved in somebody's account,
+    so ask for the new-card form."""
+    for frame in _card_frames(page, kind):
         for loc in (frame.get_by_role("link", name=NEW_CARD), frame.get_by_role("button", name=NEW_CARD),
                     frame.get_by_text(NEW_CARD), frame.locator("#use-another-card, .new-card, [id*=newCard i]")):
             el = await _first_visible([loc])
@@ -340,8 +340,8 @@ async def _use_new_card(page: Page) -> bool:
     return False
 
 
-async def _select_group(page: Page) -> bool:
-    css, _, label, avoid = GROUPS[card_kind()]
+async def _select_group(page: Page, kind: str) -> bool:
+    css, _, label, avoid = GROUPS[kind]
     for loc in (page.locator(css), page.get_by_role("link", name=label), page.get_by_text(label)):
         n = await loc.count()
         for i in range(n):
@@ -355,7 +355,7 @@ async def _select_group(page: Page) -> bool:
             if await el.is_visible():
                 await el.click()
                 await page.wait_for_timeout(800)
-                print(f"    payment method: {text.strip()[:40] or card_kind()}")
+                print(f"    payment method: {text.strip()[:40] or kind}")
                 return True
     return False
 
@@ -400,14 +400,14 @@ async def describe_frames(page: Page) -> None:
 async def fill_card(sb: Sandbox, card: dict) -> dict:
     """Type the card. Returns {filled, missing}: field names only, never values."""
     page = sb.main
-    for key, secret in (("pan", "pan"), ("cvv", "cvv"), ("holder", "holder"), ("dni", "card_dni")):
+    for key, secret in (("pan", "pan"), ("cvv", "cvv"), ("holder", "holder")):
         if card.get(key):
             sb.secrets[secret] = card[key]  # redacted from anything Jev or a log could read from here on
     # Always choose the group explicitly: the page may open on whatever the account used last.
-    await _select_group(page)
-    root = await _card_root(page, 3000)
-    if not root and await _use_new_card(page):
-        root = await _card_root(page, 4000)
+    await _select_group(page, card["kind"])
+    root = await _card_root(page, 3000, card["kind"])
+    if not root and await _use_new_card(page, card["kind"]):
+        root = await _card_root(page, 4000, card["kind"])
     if not root:
         await describe_frames(page)
         return {"filled": [], "missing": ["pan"], "where": "no card form found"}
@@ -438,11 +438,9 @@ async def fill_card(sb: Sandbox, card: dict) -> dict:
     else:
         await put("expiry", f"{card['month']}/{yy}")
     await put("cvv", card["cvv"])
-    # The cardholder's document belongs to the card (CARD_DNI), not to whoever is logged in.
-    doc = card.get("dni") or sb.secrets.get("dni")
-    if doc:
-        if await put("document", doc, optional=True) and not card.get("dni"):
-            print("    cardholder document: CARD_DNI unset, used the account's DNI")
+    # The cardholder document is the shopper's profile DNI, the one they log in with.
+    if sb.secrets.get("dni"):
+        await put("document", sb.secrets["dni"], optional=True)
     # Single-payment installment: VTEX preselects one; leave it.
     print(f"    card form in {where}: filled {', '.join(filled) or 'nothing'}"
           + (f"; missing {', '.join(missing)}" if missing else ""))
@@ -484,13 +482,13 @@ async def _pay_button(page: Page) -> Locator | None:
     return None
 
 
-async def pay(sb: Sandbox) -> dict:
+async def pay(sb: Sandbox, job_card: dict | None) -> dict:
     """Fill the card and, when one is configured, press Pay. Outcome:
     placed | declined | not_attempted | error, plus a detail line safe to show."""
     page = sb.main
-    card = card_from_env()
+    card = normalize_card(job_card)
     if not card:
-        return {"payment": "not_attempted", "detail": "no card configured (CARD_*)"}
+        return {"payment": "not_attempted", "detail": "the job carried no card (shared_card has no row?)"}
     try:
         filled = await fill_card(sb, card)
     except Exception as e:

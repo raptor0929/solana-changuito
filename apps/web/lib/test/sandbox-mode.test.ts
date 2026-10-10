@@ -26,11 +26,11 @@ describe('sandbox mode comes from the config flags, not the environment', () => 
   });
 
   it('refuses to start a job when checkout is off', async () => {
-    await assert.rejects(startJob(ORDER, ITEMS, SHOPPER, OFF, NO_URL));
+    await assert.rejects(startJob(ORDER, ITEMS, SHOPPER, undefined, OFF, NO_URL));
   });
 
   it('a mock job walks to a placed order', async () => {
-    const id = await startJob(ORDER, ITEMS, SHOPPER, { mock: true, mockFail: false }, URL_SET);
+    const id = await startJob(ORDER, ITEMS, SHOPPER, undefined, { mock: true, mockFail: false }, URL_SET);
     assert.match(id, /^mock-k-/);
     const job = await readJob(id.replace(/^mock-k-\d+/, `mock-k-${Date.now() - 30_000}`));
     assert.equal(job.status, 'done');
@@ -38,7 +38,7 @@ describe('sandbox mode comes from the config flags, not the environment', () => 
   });
 
   it('sandbox_mock_fail makes the card come back declined', async () => {
-    const id = await startJob(ORDER, ITEMS, SHOPPER, { mock: true, mockFail: true }, NO_URL);
+    const id = await startJob(ORDER, ITEMS, SHOPPER, undefined, { mock: true, mockFail: true }, NO_URL);
     assert.match(id, /^mock-f-/);
     const job = await readJob(id.replace(/^mock-f-\d+/, `mock-f-${Date.now() - 30_000}`));
     assert.equal(job.result?.payment, 'declined');

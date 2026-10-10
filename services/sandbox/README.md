@@ -2,9 +2,11 @@
 
 A Jev + Playwright worker that logs into the shopper's Día account, fills the
 cart with an escrowed basket by SKU, picks the delivery, and pays with the
-operator's card (`CARD_*`). Without a card it stops at the payment step. The
-web app starts a job after the shopper's USDC is locked, polls it, and
-settles the escrow only when Día places the order.
+operator's card. The service holds neither: each job brings the shopper's
+login (their encrypted profile in the web app) and the card (the web app's
+`shared_card` row). A job without a card stops at the payment step. The web
+app starts a job after the shopper's USDC is locked, polls it, and settles
+the escrow only when Día places the order.
 
 Design, job API, safety rules, limitations and Railway deploy:
 [`docs/sandbox.md`](../../docs/sandbox.md).
@@ -28,20 +30,40 @@ Envío programado. Details in
 
 ## Run locally
 
-Copy [`.env.example`](.env.example) to `.env` (git-ignored) and fill it in:
-the TypeSafe key, `SANDBOX_TOKEN`, the card, and a Día account for local
-runs. Every variable is annotated there.
+Copy [`.env.example`](.env.example) to `.env` (git-ignored) and fill in the two
+variables there: the TypeSafe key and `SANDBOX_TOKEN`.
 
-Docker is the simplest way: the image carries Chromium, so nothing
-browser-related is installed on your machine. The code is mounted, so edits
-need no rebuild.
+The usual way to drive it is the web app: point it at the service with
+`SANDBOX_URL=http://localhost:8080` and the same `SANDBOX_TOKEN`, turn the mock
+off (`npm run config -- set sandbox_mock false`), and every checkout sends the
+shopper's profile and the `shared_card` row.
+
+Docker is the simplest way to run it: the image carries Chromium, so nothing
+browser-related is installed on your machine.
 
 ```sh
 cd services/sandbox
 docker build -t changuito-sandbox .
-docker run --rm --env-file .env -e PYTHONUNBUFFERED=1 \
+docker run --rm --env-file .env -p 8080:8080 changuito-sandbox
+```
+
+## CLI
+
+For a run without the web app, write the job's `shopper` and optional `card`
+to a JSON file, in the same shapes as `POST /jobs`, and keep it out of git
+(`traces/` is ignored):
+
+```json
+{
+  "shopper": { "email": "…", "password": "…", "dni": "30123456", "postcode": "1425" },
+  "card": { "pan": "…", "cvv": "…", "exp_month": "07", "exp_year": "29", "holder": "…", "kind": "debit" }
+}
+```
+
+```sh
+docker run --rm --env-file .env -e PYTHONUNBUFFERED=1 -v "$PWD/traces:/app/traces" \
   -v "$PWD/agent.py:/app/agent.py" -v "$PWD/checkout.py:/app/checkout.py" -v "$PWD/sandbox.py:/app/sandbox.py" \
-  changuito-sandbox uv run python agent.py --list "Fideos Tirabuzón Favorita 500 Gr." --skus 61450
+  changuito-sandbox uv run python agent.py --job traces/job.json --list "Fideos Tirabuzón Favorita 500 Gr." --skus 61450
 ```
 
 Headed on a virtual display, with a video in `traces/video/`. The video shows
@@ -52,35 +74,12 @@ a container's PID 1.
 ```sh
 docker run --rm --init --env-file .env -e PYTHONUNBUFFERED=1 -v "$PWD/traces:/app/traces" changuito-sandbox \
   sh -c 'Xvfb :99 -screen 0 1366x900x24 -nolisten tcp >/dev/null 2>&1 & export DISPLAY=:99; sleep 1;
-         uv run python agent.py --headed --record --list "…" --skus …'
+         uv run python agent.py --job traces/job.json --headed --record --list "…" --skus …'
 ```
+
+`--trace` saves a Playwright trace from login to the payment step, never the
+card (`uv run playwright show-trace traces/run-<ts>.zip`). Traces contain the
+Día account's personal data after login. Do not share them.
 
 Without Docker: Python 3.12 and [uv](https://docs.astral.sh/uv/), then
 `uv sync && uv run playwright install chromium`.
-
-Job API:
-
-```sh
-uv run --env-file .env uvicorn server:app --port 8080
-curl localhost:8080/health
-curl -X POST localhost:8080/jobs \
-  -H "Authorization: Bearer $SANDBOX_TOKEN" -H 'content-type: application/json' \
-  -d '{"order_id":"local-test-0001","items":[{"name":"fideos","quantity":2,"sku":"61450"}]}'
-curl -H "Authorization: Bearer $SANDBOX_TOKEN" localhost:8080/jobs/<job_id>
-```
-
-A job without `shopper` logs into the `DIA_ARG_*` account. Point the web app
-at it with `SANDBOX_URL=http://localhost:8080` and the same `SANDBOX_TOKEN`.
-Without `SANDBOX_URL` the web app uses an in-process mock instead
-(`apps/web/lib/checkout/sandbox.ts`).
-
-## CLI
-
-```sh
-uv run --env-file .env agent.py --list "fideos" --skus 61450   # by SKU: the fast path
-uv run --env-file .env agent.py --headed                       # watch it
-uv run --env-file .env agent.py --trace --list "fideos, jamón, queso"
-uv run playwright show-trace traces/run-<ts>.zip               # replay: login to payment step, never the card
-```
-
-Traces contain the Día account's personal data after login. Do not share them.
