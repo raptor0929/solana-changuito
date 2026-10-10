@@ -1,5 +1,9 @@
 import type { Lang } from '../lang.ts';
 
+/** `$1.584,18`: pesos the way the store writes them. */
+const pesos = (n: number) =>
+  `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 /** The escrow checkout's words. Nothing here is estimated: every line reports something that happened. */
 export interface EscrowCopy {
   title: string;
@@ -7,9 +11,13 @@ export interface EscrowCopy {
   loginLead: string;
   loginCta: string;
   preparing: string;
+  confirmLead: string;
+  itemsLabel: string;
+  shippingLabel: (option: string) => string;
   totalLabel: string;
+  rateLabel: (source: string) => string;
+  rateValue: (rate: number) => string;
   lockLabel: string;
-  rateNote: (rate: number) => string;
   escrowNote: string;
   balanceLabel: string;
   short: string;
@@ -40,9 +48,13 @@ const ES: EscrowCopy = {
   loginLead: 'Entrá con tu email. Te creamos una billetera de Solana (devnet) y nosotros pagamos las comisiones.',
   loginCta: 'Entrar con email',
   preparing: 'Preparando el pedido…',
+  confirmLead: 'Revisá antes de pagar: estos son los precios y el envío que Día cobra hoy a tu código postal.',
+  itemsLabel: 'Productos',
+  shippingLabel: (option) => `Envío (${option})`,
   totalLabel: 'Total en el súper',
+  rateLabel: (source) => (source === 'belo' ? 'Cambio (Belo)' : 'Cambio'),
+  rateValue: (rate) => `1 USDC = ${pesos(rate)}`,
   lockLabel: 'A bloquear',
-  rateNote: (rate) => `Al cambio de $${Math.round(rate)} por dólar, con 15% extra para el envío.`,
   escrowNote:
     'La plata queda en un escrow en Solana, no con nosotros. Si la compra no llega al pago, vuelve a tu billetera sola.',
   balanceLabel: 'Tu saldo',
@@ -81,9 +93,13 @@ const EN: EscrowCopy = {
   loginLead: "Sign in with your email. We create a Solana (devnet) wallet for you and cover the fees.",
   loginCta: 'Sign in with email',
   preparing: 'Preparing the order…',
+  confirmLead: "Check before paying: these are the prices and the delivery fee Día charges your postal code today.",
+  itemsLabel: 'Products',
+  shippingLabel: (option) => `Delivery (${option})`,
   totalLabel: 'Store total',
+  rateLabel: (source) => (source === 'belo' ? 'Rate (Belo)' : 'Rate'),
+  rateValue: (rate) => `1 USDC = ${pesos(rate)}`,
   lockLabel: 'To lock',
-  rateNote: (rate) => `At ${Math.round(rate)} pesos per dollar, plus 15% for delivery.`,
   escrowNote:
     "The money sits in an escrow on Solana, not with us. If the purchase doesn't reach payment, it goes back to your wallet on its own.",
   balanceLabel: 'Your balance',

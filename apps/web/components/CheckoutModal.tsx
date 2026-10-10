@@ -18,8 +18,10 @@ import { useLang } from './LangProvider';
  * From a full basket to a settled escrow, in four steps:
  *
  *   1. login   — email through Privy; the embedded Solana wallet comes with it.
- *   2. lock    — the server quotes (order id, basket hash, USDC amount) and
- *                builds `open` with the resolver as fee payer; the wallet
+ *   2. lock    — the server quotes (order id, basket hash, USDC amount): the
+ *                store's own price for the basket plus its delivery fee, at
+ *                Belo's USDC rate. The shopper confirms that breakdown, then
+ *                the server builds `open` with the resolver as fee payer; the wallet
  *                signs it as the buyer, the server co-signs and sends. The
  *                USDC is now in a vault the program owns, not in an account
  *                of ours.
@@ -37,6 +39,8 @@ import { useLang } from './LangProvider';
 interface Props {
   cart: Cart;
   handoffUrl?: string;
+  /** Where the agent shopped: the store quotes delivery to this postal code. */
+  location: { postalCode: string; salesChannel: string } | null;
   chatId?: string;
   onClose: () => void;
   onPaid: (receipt: Receipt) => void;
@@ -46,7 +50,7 @@ const POLL_MS = 3_000;
 
 type Step = 'login' | 'review' | 'locking' | 'shopping' | 'done' | 'refunded';
 
-export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
+export function CheckoutModal({ cart, handoffUrl, location, onClose, onPaid }: Props) {
   const lang = useLang();
   const copy = escrowCopy(lang);
   const wallet = useWallet();
@@ -76,7 +80,7 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
         const res = await fetch('/api/checkout/quote', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ cart, handoffUrl }),
+          body: JSON.stringify({ cart, handoffUrl, location }),
         });
         const body = await res.json().catch(() => null);
         if (!res.ok) throw new Error(body?.error ?? copy.failed);
@@ -86,7 +90,7 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
         quoting.current = false;
       }
     })();
-  }, [wallet.ready, wallet.address, wallet.accessToken, quote, cart, handoffUrl, copy.failed]);
+  }, [wallet.ready, wallet.address, wallet.accessToken, quote, cart, handoffUrl, location, copy.failed]);
 
   const short = Boolean(quote && balance && BigInt(balance.usdc) < BigInt(quote.amount));
 
@@ -183,7 +187,7 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
       paidDisplay: `${quote.amountDisplay} USDC`,
       paidAt: Date.now(),
       lines: cart.lines.filter((l) => l.available).map((l) => ({ name: l.name, quantity: l.quantity, lineTotal: l.lineTotal.display })),
-      total: cart.total.display,
+      total: quote.totalDisplay,
     });
   }, [step, quote, cart, onClose, onPaid]);
 
@@ -242,10 +246,23 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
 
           {(step === 'review' || step === 'locking') && quote ? (
             <div className="ck-pay" data-testid="checkout-lock-step">
-              <dl className="ck-totals">
+              <p className="ck-lead">{copy.confirmLead}</p>
+              <dl className="ck-totals" data-testid="checkout-breakdown">
+                <div className="ck-total-line">
+                  <dt>{copy.itemsLabel}</dt>
+                  <dd>{quote.itemsDisplay}</dd>
+                </div>
+                <div className="ck-total-line">
+                  <dt>{copy.shippingLabel(quote.shippingLabel)}</dt>
+                  <dd data-testid="checkout-shipping">{quote.shippingDisplay}</dd>
+                </div>
                 <div className="ck-total-line">
                   <dt>{copy.totalLabel}</dt>
-                  <dd>{cart.total.display}</dd>
+                  <dd>{quote.totalDisplay}</dd>
+                </div>
+                <div className="ck-total-line">
+                  <dt>{copy.rateLabel(quote.rateSource)}</dt>
+                  <dd data-testid="checkout-rate">{copy.rateValue(quote.arsPerUsd)}</dd>
                 </div>
                 <div className="ck-total-line ck-total-sum">
                   <dt>{copy.lockLabel}</dt>
@@ -258,7 +275,6 @@ export function CheckoutModal({ cart, handoffUrl, onClose, onPaid }: Props) {
                   </div>
                 ) : null}
               </dl>
-              <p className="ck-note">{copy.rateNote(quote.arsPerUsd)}</p>
               <p className="ck-note">{copy.escrowNote}</p>
 
               {short ? (

@@ -144,6 +144,7 @@ export function Fixtures() {
         <CheckoutModal
           cart={CHECKOUT_CART}
           handoffUrl="https://diaonline.supermercadosdia.com.ar/checkout/?orderFormId=f0e1d2c3b4a5968778695a4b3c2d1e0f"
+          location={{ postalCode: '1181', salesChannel: '1' }}
           onClose={() => setCheckout(false)}
           onPaid={() => setCheckout(false)}
         />

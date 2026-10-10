@@ -102,7 +102,7 @@ function ChatCore({
   const copy = uiCopy(lang).chat;
   // `lang` rides along so the agent answers in the language the footer is set
   // to. Nothing else about the request changes with it.
-  const { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId } =
+  const { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId, currentLocation } =
     useChat({ isAuthenticated, address, sign, network, lang });
   const [draft, setDraft] = useState('');
   const [photo, setPhoto] = useState<ChatImage | null>(null);
@@ -117,7 +117,11 @@ function ChatCore({
   photoRef.current = photo;
   // The basket the payment modal is open over. A cart, not a block id: the
   // user pays for what a card showed, and that object is the record of it.
-  const [paying, setPaying] = useState<{ cart: Cart; handoffUrl?: string } | null>(null);
+  const [paying, setPaying] = useState<{
+    cart: Cart;
+    handoffUrl?: string;
+    location: { postalCode: string; salesChannel: string } | null;
+  } | null>(null);
   const thread = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
 
@@ -421,18 +425,15 @@ function ChatCore({
                   key={b.id}
                   cart={b.cart}
                   handoffUrl={b.handoffUrl}
-                  // No longer gated on a wallet. The frame-checkout flow asks
-                  // for an importe and a code, and the shopper pays the súper
-                  // themselves — there is nothing here to sign, so requiring a
-                  // session to sign with would shut the door on the people the
-                  // flow was built for.
+                  // Not gated on a wallet: the checkout modal signs the shopper
+                  // in as its first step, so the button opens it either way.
                   onPay={
                     // Not just disabled: a paid chat's card is a record of
                     // what was bought, and a Pagar on it invites paying twice.
                     canOrder
                       ? (cart) => {
                           track('payment_start', { flow: 'frame' });
-                          setPaying({ cart, handoffUrl: b.handoffUrl });
+                          setPaying({ cart, handoffUrl: b.handoffUrl, location: currentLocation() });
                         }
                       : undefined
                   }
@@ -667,6 +668,7 @@ function ChatCore({
         <CheckoutModal
           cart={paying.cart}
           handoffUrl={paying.handoffUrl}
+          location={paying.location}
           // The chat the server knows, which is the one `archiveChat` wrote —
           // `publish` files the record under the agent's session id, so this
           // is the same uuid `orders.chat_id` references. Undefined until the

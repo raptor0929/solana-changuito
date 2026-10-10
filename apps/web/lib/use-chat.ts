@@ -365,5 +365,15 @@ export function useChat(auth?: UseChatAuth) {
    */
   const currentSessionId = useCallback(() => sessionId.current || null, []);
 
-  return { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId };
+  /**
+   * The postal code and sales channel the agent shopped with, from the session
+   * snapshot. The checkout quote needs them to ask the store for delivery.
+   * A getter for the same reason as currentSessionId.
+   */
+  const currentLocation = useCallback(() => {
+    const loc = snapshot.current?.location;
+    return loc ? { postalCode: loc.postalCode, salesChannel: loc.salesChannel } : null;
+  }, []);
+
+  return { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId, currentLocation };
 }
