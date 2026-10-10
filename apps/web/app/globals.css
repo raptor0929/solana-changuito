@@ -718,6 +718,54 @@ a:hover { color: var(--chg-arcilla); }
   gap: 6px;
 }
 .wallet-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.wallet-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+/* The profile avatar. Brand kit (apps/branding): espresso initials on
+   sunflower, which is the CTA pairing and clears contrast; round, like the
+   pill buttons beside it. */
+.avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  border: 0;
+  background: var(--brand);
+  color: var(--brand-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.avatar:hover { background: var(--chg-sunflower-hover); }
+.avatar:active { background: var(--chg-sunflower-active); }
+.avatar:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 2px; }
+
+/* Tabs in a dialog's head. Text stays espresso; the selected tab is marked by
+   a sunflower bar, never by sunflower text (too little contrast on
+   off-white — brand manual §14). */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: 8px; }
+.tab {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 8px 12px 9px;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.tab:hover { color: var(--text); }
+.tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--brand); }
+.tab:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: -2px; border-radius: 8px; }
+.ck-hint { font-size: 12px; color: var(--muted); }
+.ck-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+.ck-check input { accent-color: var(--brand-ink); }
 .wallet-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .wallet-addr {
   border: 0;

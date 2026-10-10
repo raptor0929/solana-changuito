@@ -4,11 +4,12 @@
 the shopper's USDC is locked in the escrow, it logs into **the shopper's own
 Día account** in a headless browser, empties the cart, adds the basket by SKU,
 attaches the delivery address and window, opens the payment step, and pays
-with **the operator's card** (`CARD_*`). The escrow settles only when Día
+with **the operator's card** (the `shared_card` row, sent in the job). The escrow settles only when Día
 places the order; anything else refunds.
 
 **The sandbox can place real orders.** It presses "Finalizar compra" only when
-a card is configured (`CARD_PAN` and the rest of `CARD_*`). Without one it
+the job carries a card, which the web app reads from `shared_card` (migration
+0004) at checkout start. Without a row it
 stops at the payment step, the order endpoints stay aborted at the network
 level, and the escrow refunds. The gate is the card itself, not a separate
 flag: a flag naming a resource can outlive the resource (CLAUDE.md §5).
@@ -62,7 +63,7 @@ API or a label is deterministic.
 | `empty_cart` | API | `POST orderForm/{id}/items/removeAll` (Jev only if that leaves items) | the `orderForm` has no items |
 | `shop` | API | `POST orderForm/{id}/items` with each line's SKU, quantity and seller (from the catalog API). Lines without a SKU, or that the store rejects, go to Jev's search-by-name loop | every line is in the `orderForm` |
 | `checkout` | API | `attachments/shippingData`: the account's current address, else a saved one in the shopper's postcode, else the job's `street`/`number` at its postcode; then home delivery, the scheduled option's earliest window, else the cheapest. Then straight to `#/payment` (Jev only if VTEX bounces back) | the URL stays on `#/payment` |
-| `payment` | labels | select **Tarjeta de débito** (`CARD_KIND=credit` for crédito), choose "otra tarjeta" if the account has saved cards, fill the card in VTEX's `card-ui` iframe, tick "Acepto las Políticas de Privacidad", press `#end_payment` | `orderPlaced` URL (placed), a decline message, 5× refused `/transaction`, or 90 s |
+| `payment` | labels | select **Tarjeta de débito** (crédito when the card's `brand` says credit), choose "otra tarjeta" if the account has saved cards, fill the card in VTEX's `card-ui` iframe, tick "Acepto las Políticas de Privacidad", press `#end_payment` | `orderPlaced` URL (placed), a decline message, 5× refused `/transaction`, or 90 s |
 
 Timings from the live runs on 2026-10-10 (one SKU, Docker): login 50–63 s,
 empty cart ~1 s, shop ~2.5 s, checkout ~5 s, payment 7–10 s; **66 s wall**
@@ -103,7 +104,7 @@ Content-Type: application/json
   "items": [                                   // 1–25 items
     { "name": "Fideos Tirabuzón Favorita 500 Gr.", "quantity": 2, "sku": "61450" }
   ],
-  "shopper": {                                 // optional; absent = the operator's DIA_ARG_* account
+  "shopper": {                                 // required: the shopper's saved profile
     "email": "…", "password": "…", "dni": "30123456",
     "postcode": "1425",                        // where the shopper browsed
     "street": "…", "number": "…", "phone": "…" // only used if the account has no saved address
@@ -114,8 +115,10 @@ Content-Type: application/json
 `shopper` lives on the in-memory job until the run ends and is then deleted.
 `GET /jobs/{id}` never returns it, `repr()` of it prints `<redacted>`, and its
 values are redacted from everything Jev reads and everything the run prints.
-A job that brings a shopper never falls back to any `DIA_ARG_*` value: the
-operator's account and address are never typed into somebody else's.
+`card` is optional: `{pan, cvv, exp_month, exp_year, holder, kind}` from the
+`shared_card` row. Same rules as `shopper` — in memory for the run, deleted
+after, `<redacted>` in any repr, and a 422 never echoes either. Nothing in
+the service reads a login or a card from its environment.
 
 ```json
 { "job_id": "3b0c8f6e2a…" }
@@ -176,9 +179,9 @@ No auth; Railway's healthcheck uses it.
 
 | `sandboxMode()` | When | Behaviour |
 |---|---|---|
-| `remote` | `SANDBOX_URL` is set | real HTTP calls with `Bearer SANDBOX_TOKEN` |
-| `mock` | no `SANDBOX_URL`, outside production — or in production with `SANDBOX_MOCK=1` | in-process, stateless mock: the job id encodes its start time; phases `login` 0s → `empty_cart` 4s → `shop` 7s → `checkout` 15s → `payment` 20s → `placed` 24s with `payment: "placed"`. `SANDBOX_MOCK_FAIL=1` makes the card come back `declined` (the refund path) |
-| `off` | production, no `SANDBOX_URL`, no `SANDBOX_MOCK` | `startJob` throws; the order is refunded on the next status poll |
+| `remote` | mock off and `SANDBOX_URL` is set | real HTTP calls with `Bearer SANDBOX_TOKEN` |
+| `mock` | `config.sandbox_mock` is on (`npm run config -- set sandbox_mock true`), whatever `SANDBOX_URL` says | in-process, stateless mock: the job id encodes its start time; phases `login` 0s → `empty_cart` 4s → `shop` 7s → `checkout` 15s → `payment` 20s → `placed` 24s with `payment: "placed"`. `config.sandbox_mock_fail` makes the card come back `declined` (the refund path) |
+| `off` | mock off and no `SANDBOX_URL` (also: no database, so no `config` row) | `startJob` throws; the order is refunded on the next status poll |
 
 The mapping into the escrow lives in `app/api/checkout/status/route.ts`:
 
@@ -203,21 +206,20 @@ picked by the same rule as the sandbox (`lib/checkout/shipping.ts` mirrors
 
 Enforced in `sandbox.py` and `checkout.py`:
 
-- **No order without a card.** Until the card is typed and `CARD_*` is set,
+- **No order without a card.** Until the job's card is typed,
   `/transaction`, `/payments`, `gatewayCallback` and `orderPlaced` requests are
   aborted at the network level and counted (`orders_blocked`). Jev is never
   offered "comprar ahora / confirmar compra / realizar pedido / pagar ahora";
   only `checkout.pay` presses Pay.
-- **The card is never Jev's and never logged.** `checkout.py` reads `CARD_*`
-  at the moment it types and logs only which *fields* it filled. Card values
+- **The card is never Jev's and never logged.** `checkout.py` takes the
+  job's card at the moment it types and logs only which *fields* it filled. Card values
   join the redaction list, the Playwright trace is stopped before the payment
   step, and the jsonl step log follows the trace. `--record` (CLI only) is the
   one exception and says so: a video cannot skip the card form, so it is for
   test cards, and `*.webm`/`*.mp4` are git-ignored repo-wide.
 - **Always the operator's card.** If the shopper's account has saved cards,
   the run asks for the new-card form; it never pays with a card saved in
-  somebody's account. The cardholder document is `CARD_DNI`, not the
-  shopper's DNI (falls back to the account DNI, with a log line, when unset).
+  somebody's account. The cardholder document is the shopper's profile DNI.
 - **Credentials never reach the model.** Jev sees options like "type the
   account password into its empty field"; the harness types the job's value.
   DNI, email, password, postcode, street, phone and card values are redacted
@@ -301,14 +303,10 @@ chromium`, then `uvicorn server:app` on `$PORT` (default 8080).
    |---|---|
    | `TYPESAFE_API_KEY` | Jev (TypeSafe) |
    | `SANDBOX_TOKEN` | shared bearer token with the web app (long random string) |
-   | `CARD_PAN`, `CARD_EXPIRY_MONTH`, `CARD_EXPIRY_YEAR`, `CARD_CVV`, `CARD_NAME` | the card every order is paid with. All five or none: none means no order is ever placed |
-   | `CARD_DNI` | the cardholder's document, asked by Día's card form |
-   | `CARD_KIND` | `debit` (default) or `credit`: which payment group to use |
-   | `DIA_ARG_DNI`, `DIA_ARG_EMAIL`, `DIA_ARG_PWD`, `DIA_ARG_POSTCODE` | optional: the account a job without `shopper` uses (local testing) |
 
 3. Deploy; check `GET https://<service>/health` returns `{"ok": true, …}`.
 4. In the web app (Vercel) set `SANDBOX_URL=https://<service>` and the same
-   `SANDBOX_TOKEN`. Unset `SANDBOX_MOCK` / `SANDBOX_MOCK_FAIL`.
+   `SANDBOX_TOKEN`, and `npm run config -- set sandbox_mock false`.
 
 ## Run locally
 

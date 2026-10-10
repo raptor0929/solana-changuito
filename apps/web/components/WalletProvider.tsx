@@ -72,7 +72,8 @@ function Bridge({ children }: { children: React.ReactNode }) {
       ready: ready && (!authenticated || walletsReady),
       authenticated,
       address,
-      email: user?.email?.address ?? null,
+      // A Google login has no `email` account, only `google.email`; both feed the avatar's initials.
+      email: user?.email?.address ?? user?.google?.email ?? null,
       login: () => login(),
       logout: () => logout(),
       accessToken: () => getAccessToken(),

@@ -361,9 +361,13 @@ half, and `docs/sandbox.md` the service.
 replaced on purpose, not eroded: the point of the product is that the order
 gets placed. What it was protecting is kept in the rules below.*
 
-- **The card is the gate.** The sandbox presses Pay only when all of `CARD_*`
-  is set; until the card is typed, the order and payment endpoints stay
-  aborted at the network layer. It is derived from the resource, per §5 —
+- **The card is the gate.** The sandbox presses Pay only when the job carries a
+  card — the `shared_card` row (migration 0004, `lib/shared-card.ts`), devnet
+  row first, else mainnet, read at `/api/checkout/start` and pushed in the job
+  body like the shopper's login. Nothing on the sandbox holds a card or a Día
+  login any more: no `CARD_*`, no `DIA_ARG_*`. Until the card is typed, the
+  order and payment endpoints stay aborted at the network layer; no row in
+  `shared_card` means no card in the job, so the run stops at payment. It is derived from the resource, per §5 —
   do not add a `SANDBOX_PAY` flag that can outlive the card.
 - **Settle means Día placed the order**, and the receipt carries Día's order
   number (`basis|sandbox-order-placed`). Copy must not claim more than the
@@ -373,13 +377,18 @@ gets placed. What it was protecting is kept in the rules below.*
   sandbox uses at checkout — `lib/checkout/shipping.ts` mirrors `_pick_sla` in
   `services/sandbox/checkout.py`, so change them together. No fallback rate
   source: a different exchange's rate is a different price.
-- **The shopper's Día login is passed through, never kept.** It is in the
-  modal's state, the one `/api/checkout/start` request body and the sandbox
-  job's memory, and nowhere else: not the checkout record, not a log, not
-  `chat-store`. Same reasoning as the archive in §4, one step stronger: a
-  password opens their whole account.
-- **Never pay with a card saved in the shopper's account**, and never type
-  the shopper's DNI as the cardholder's (`CARD_DNI`). The card is ours.
+- **The shopper's Día login is kept only encrypted, and only in `profile`.**
+  AES-256-GCM in the web server (`lib/profile-crypto.ts`) with
+  `PROFILE_ENC_KEY`, which the database never sees; the envelope is bound to
+  `network|address`, so a row moved to another wallet does not open. It is
+  decrypted in exactly one place, `/api/checkout/start`, and pushed in the
+  job body to the sandbox, which never touches the database or the key.
+  `/api/profile` takes the password and never returns it (`hasPassword`).
+  Not in the checkout record, not a log, not `chat-store`. There is no
+  fallback key: no `PROFILE_ENC_KEY` means no profile, not a weaker one.
+- **Never pay with a card saved in the shopper's account.** The card is ours.
+  The cardholder document is the shopper's profile DNI. Debit unless the
+  row's `brand` says credit.
 - **Known blocker:** Día's checkout refuses `/transaction` with `CHK0082`
   (reCAPTCHA token required). We do not solve or bypass CAPTCHAs; see
   `docs/sandbox.md`.
@@ -399,9 +408,14 @@ gets placed. What it was protecting is kept in the rules below.*
 - **Settle and refund check on-chain status first.** Polls overlap; the
   program rejects a second close anyway, but a failed transaction is a red
   line in the UI for nothing.
-- **No `SANDBOX_URL` in dev means a mock job** (`lib/checkout/sandbox.ts`), and
-  `SANDBOX_MOCK_FAIL=1` makes its card come back declined (the refund path).
-  In production the mock is off unless `SANDBOX_MOCK=1`. `scripts/devnet-e2e.mts` drives the routes against
+- **The mock is a row, not a variable.** `config.sandbox_mock` (migration
+  0008, `lib/config.ts`, flipped with `npm run config -- set sandbox_mock
+  true`) puts every new checkout on the in-process mock, even with
+  `SANDBOX_URL` set; `sandbox_mock_fail` makes its card come back declined
+  (the refund path). The env vars `SANDBOX_MOCK*` are gone and nothing reads
+  them. A missing row, table or database reads as off, so with no
+  `SANDBOX_URL` checkout refunds — including a fresh clone without a
+  database. `scripts/devnet-e2e.mts` drives the routes against
   devnet with it.
 - **`next build` typechecks through `tsconfig.build.json`**, which leaves out
   `lib/test`. Several tests still pin Stellar behaviour and fail typecheck; per

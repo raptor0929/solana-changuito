@@ -223,10 +223,9 @@ in `apps/web/.env.example`; setup in [`../DEPLOY.md`](../DEPLOY.md).
 | `CHG_SESSION_SECRET` | in production | signs the httpOnly `chg_user` cookie. Unset in production, login answers 503. Locally a dev constant stands in |
 | `SOLANA_RESOLVER_SECRET` | for faucet, `open` fees, settle, refund | the resolver keypair, as the 64-byte JSON array or base58. Checked against `DEPLOYMENTS.devnet.resolver` and refused on mismatch. Read at call time, so a build without it succeeds; the faucet answers 503 |
 | `SOLANA_RPC_URL`, `NEXT_PUBLIC_SOLANA_RPC_URL` | no | server and browser RPC. Default `https://api.devnet.solana.com`, which rate-limits; a dedicated devnet RPC is worth it on a public URL |
-| `SANDBOX_URL` | for real shopping in production | the Railway sandbox. Unset outside production, an in-process mock answers; unset in production, checkout cannot start (and refunds) unless `SANDBOX_MOCK=1` |
+| `SANDBOX_URL` | for real shopping in production | the Railway sandbox. Unset, checkout cannot start (and refunds) unless `config.sandbox_mock` is on |
 | `SANDBOX_TOKEN` | with `SANDBOX_URL` | Bearer token; must equal the sandbox's own `SANDBOX_TOKEN` |
-| `SANDBOX_MOCK` | no | `1` lets a production build use the mock — a demo without the browser farm |
-| `SANDBOX_MOCK_FAIL` | no | `1` makes the mock fail at checkout: the refund path |
+| `PROFILE_ENC_KEY` | for saved profiles | 32 random bytes, base64. Encrypts the shoppers' Día details (`lib/profile-crypto.ts`). `PROFILE_ENC_KEY_OLD` keeps old rows readable during a rotation. The sandbox mock is no longer an env var: it is `config.sandbox_mock`, see `npm run config` |
 | `ARS_PER_USD` | no | pin the rate so a demo quotes the same number every time. Unset means the live feed |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | in production | the human gate. The secret alone decides it, and unset in production it fails shut |
 | `DATABASE_URL` | in production | conversation history, quotas and checkout records across instances (`kv`, `quota`), and the chat archive for signed-in wallets. Locally an in-process Map stands in; in production the quotas fail closed without it. Orders do not need it |
@@ -240,8 +239,6 @@ in `apps/web/.env.example`; setup in [`../DEPLOY.md`](../DEPLOY.md).
 |---|---|---|
 | `SANDBOX_TOKEN` | yes | Bearer auth on `/jobs`. Unset, `/jobs` answers 503 |
 | `TYPESAFE_API_KEY` | yes | Jev |
-| `DIA_ARG_EMAIL`, `DIA_ARG_PWD`, `DIA_ARG_DNI` | yes | the operator's Día account. Typed by the harness from the environment and redacted from everything Jev sees |
-| `DIA_ARG_POSTCODE` | yes | the delivery postcode checkout asks for |
 | `PORT` | no | set by Railway; the image defaults to 8080 |
 
 There is **no network or mode variable, and there must not be one.** Devnet is

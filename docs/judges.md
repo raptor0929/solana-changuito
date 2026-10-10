@@ -136,7 +136,7 @@ The script generates a throwaway keypair in place of the Privy wallet, mints a
 session cookie with the dev secret, then runs **faucet → quote → open → start →
 poll status** and prints each Solscan link. The mock sandbox reaches payment in
 about 20 seconds and the order settles. Restart the dev server with
-`SANDBOX_MOCK_FAIL=1` and run it again for the refund path.
+`npm run config -- set sandbox_mock_fail true` and run it again for the refund path.
 
 Leave `CHG_SESSION_SECRET` **and** `TURNSTILE_SECRET_KEY` unset in
 `.env.local` for this. The script signs its cookie with the dev session secret,

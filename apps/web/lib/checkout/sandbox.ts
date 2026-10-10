@@ -6,15 +6,20 @@
  *   POST {SANDBOX_URL}/jobs        { order_id, items, shopper }   -> { job_id }
  *   GET  {SANDBOX_URL}/jobs/{id}                                  -> SandboxJob
  *
- * `shopper` carries the shopper's Día login. It goes from the start route
- * straight into this request body and nowhere else: not the checkout record,
- * not a log line. The sandbox holds it in memory for the run and drops it.
+ * `shopper` carries the shopper's Día login and `card` the operator's card
+ * (lib/shared-card.ts). Both go from the start route straight into this
+ * request body and nowhere else: not the checkout record, not a log line.
+ * The sandbox holds them in memory for the run and drops them. A job with no
+ * card stops at the payment step and the order refunds.
  *
- * Without SANDBOX_URL, outside production, a mock answers instead: it walks
- * the same phases on a clock (~20s) and then reports a placed order. That is
- * how the escrow flow is exercised locally without a browser farm.
- * `SANDBOX_MOCK_FAIL=1` makes the payment come back declined, which is the
- * refund path.
+ * The mock is switched in the `config` table (lib/config.ts), not the
+ * environment: `npm run config -- set sandbox_mock true` makes every new
+ * checkout run on an in-process mock that walks the same phases on a clock
+ * (~25s) and reports a placed order, even when SANDBOX_URL is set. That is how
+ * the escrow flow is exercised without a browser farm, and how a demo turns
+ * the real sandbox off in seconds. `sandbox_mock_fail` makes the mock's card
+ * come back declined, which is the refund path. Neither flag set and no
+ * SANDBOX_URL: checkout is off and every locked order refunds.
  *
  * The mock is stateless on purpose: the phase is derived from when the job
  * started, so it survives Next compiling each route into its own bundle.
@@ -58,6 +63,16 @@ export interface SandboxItem {
   sku: string;
 }
 
+/** The card to pay with, as the sandbox's `Card` model takes it. Never logged; see the header. */
+export interface SandboxCard {
+  pan: string;
+  cvv: string;
+  exp_month: string;
+  exp_year: string;
+  holder: string;
+  kind: 'debit' | 'credit';
+}
+
 /** The shopper's Día login and where to deliver. Never stored; see the header. */
 export interface SandboxShopper {
   email: string;
@@ -70,9 +85,15 @@ export interface SandboxShopper {
   complement?: string;
 }
 
-export function sandboxMode(env: NodeJS.ProcessEnv = process.env): 'remote' | 'mock' | 'off' {
-  if (env.SANDBOX_URL) return 'remote';
-  return env.NODE_ENV === 'production' && env.SANDBOX_MOCK !== '1' ? 'off' : 'mock';
+/** The two `config` flags this client reads. Mirrors lib/config.ts `SandboxFlags`; kept here so tests need no db. */
+export interface MockFlags {
+  mock: boolean;
+  mockFail: boolean;
+}
+
+export function sandboxMode(flags: MockFlags, env: NodeJS.ProcessEnv = process.env): 'remote' | 'mock' | 'off' {
+  if (flags.mock) return 'mock';
+  return env.SANDBOX_URL ? 'remote' : 'off';
 }
 
 function remote(env: NodeJS.ProcessEnv) {
@@ -85,19 +106,21 @@ export async function startJob(
   orderId: string,
   items: SandboxItem[],
   shopper: SandboxShopper,
+  card: SandboxCard | undefined,
+  flags: MockFlags,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
-  const mode = sandboxMode(env);
-  if (mode === 'off') throw new Error('SANDBOX_URL is not set');
+  const mode = sandboxMode(flags, env);
+  if (mode === 'off') throw new Error('checkout is off: no SANDBOX_URL and sandbox_mock is not on');
   if (mode === 'mock') {
-    const fail = env.SANDBOX_MOCK_FAIL === '1' ? 'f' : 'k';
+    const fail = flags.mockFail ? 'f' : 'k';
     return `mock-${fail}-${Date.now()}-${items.length}`;
   }
   const { base, headers } = remote(env);
   const res = await fetch(`${base}/jobs`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ order_id: orderId, items, shopper }),
+    body: JSON.stringify({ order_id: orderId, items, shopper, ...(card ? { card } : {}) }),
   });
   if (!res.ok) throw new Error(`sandbox answered ${res.status}`);
   const body = (await res.json()) as { job_id?: string };
@@ -131,7 +154,7 @@ function mockJob(jobId: string): SandboxJob {
     result: {
       reached_payment: true,
       payment: declined ? 'declined' : 'placed',
-      payment_detail: declined ? 'mock: card declined (SANDBOX_MOCK_FAIL=1)' : 'mock: order placed',
+      payment_detail: declined ? 'mock: card declined (sandbox_mock_fail)' : 'mock: order placed',
       store_order_id: declined ? null : `mock-${started}`,
       items_added: items,
       cart: { orderFormId: `mock-orderform-${started}` },

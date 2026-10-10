@@ -8,6 +8,7 @@ import { track } from '../lib/analytics';
 import type { Receipt } from '../lib/chat-store.ts';
 import { escrowCopy } from '../lib/checkout/copy.ts';
 import type { QuoteResponse, StatusResponse } from '../lib/checkout/types.ts';
+import type { PublicProfile } from '../lib/profile.ts';
 import { ensureUserCookie } from '../lib/session-login';
 import { explorerTx } from '../lib/solana.ts';
 import { useBalances } from '../lib/use-balances.ts';
@@ -31,8 +32,11 @@ import { useLang } from './LangProvider';
  *   4. done    — Día placed the order: the resolver settled the escrow to the
  *                treasury. Anything else, a declined card included, refunds.
  *
- * The Día login lives in this component's state and in the one request to
- * /api/checkout/start. It is never put in chat-store or anywhere else.
+ * The Día login comes from the shopper's saved profile when it is complete:
+ * the browser sends nothing and the server decrypts it at start. Otherwise it
+ * is typed here, lives in this component's state and the one request to
+ * /api/checkout/start (plus /api/profile when "guardar" is ticked), and is
+ * never put in chat-store or anywhere else.
  *
  * The dialog never decides an outcome. Every stage after `lock` is what the
  * server read from the chain or the sandbox, and the server reads the chain
@@ -83,6 +87,11 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
   const [funding, setFunding] = useState(false);
   const [openSig, setOpenSig] = useState<string | null>(null);
   const [dia, setDia] = useState<DiaLogin>(EMPTY_LOGIN);
+  // The saved profile (lib/profile.ts), without its password. When it is
+  // complete the server decrypts it at /api/checkout/start and nothing is typed.
+  const [profile, setProfile] = useState<PublicProfile | null>(null);
+  const [typeOwn, setTypeOwn] = useState(false);
+  const [saveToProfile, setSaveToProfile] = useState(true);
   const quoting = useRef(false);
   const field = (k: keyof DiaLogin) => (e: ChangeEvent<HTMLInputElement>) => setDia((d) => ({ ...d, [k]: e.target.value }));
 
@@ -107,6 +116,8 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
         const body = await res.json().catch(() => null);
         if (!res.ok) throw new Error(body?.error ?? copy.failed);
         setQuote(body as QuoteResponse);
+        const p = await fetch('/api/profile', { cache: 'no-store' }).catch(() => null);
+        if (p?.ok) setProfile((await p.json().catch(() => null)) as PublicProfile | null);
       } catch (e) {
         setError(e instanceof Error ? e.message : copy.failed);
         quoting.current = false;
@@ -115,6 +126,8 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
   }, [wallet.ready, wallet.address, wallet.accessToken, quote, cart, location, handoffUrl, copy.failed]);
 
   const short = Boolean(quote && balance && BigInt(balance.usdc) < BigInt(quote.amount));
+  const fromProfile = Boolean(profile?.complete) && !typeOwn;
+  const ready = fromProfile || loginReady(dia);
 
   const faucet = useCallback(async () => {
     setFunding(true);
@@ -135,7 +148,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
 
   const lock = useCallback(async () => {
     if (!quote || !wallet.address) return;
-    if (!loginReady(dia)) {
+    if (!ready) {
       setError(copy.diaMissing);
       return;
     }
@@ -162,13 +175,24 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
       const sig = opened.openSig as string;
       setOpenSig(sig);
       track('escrow_open', { amount: quote.amountDisplay });
+      if (!fromProfile && saveToProfile) {
+        // Best effort: a profile that fails to save must not stop a purchase already paid for.
+        await fetch('/api/profile', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: dia.email, password: dia.password, dni: dia.dni }),
+        }).catch(() => null);
+      }
       const res = await fetch('/api/checkout/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           orderId: quote.orderId,
           openSig: sig,
-          dia: { email: dia.email.trim(), password: dia.password, dni: dia.dni.replace(/\D/g, '') },
+          // No `dia` means "use my saved profile"; the server decrypts it.
+          ...(fromProfile
+            ? {}
+            : { dia: { email: dia.email.trim(), password: dia.password, dni: dia.dni.replace(/\D/g, '') } }),
           address: { street: dia.street, number: dia.number, phone: dia.phone },
         }),
       });
@@ -182,7 +206,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
       setError(e instanceof Error && e.message ? e.message : copy.failed);
       setStep('review');
     }
-  }, [quote, wallet, dia, copy.failed, copy.diaMissing]);
+  }, [quote, wallet, dia, ready, fromProfile, saveToProfile, copy.failed, copy.diaMissing]);
 
   // Poll while the sandbox shops.
   useEffect(() => {
@@ -307,8 +331,22 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                 ) : null}
               </dl>
               <p className="ck-note">{copy.rateNote(quote.rateSource)}</p>
+              {quote.postalSource === 'profile' && quote.chatPostalCode && quote.chatPostalCode !== quote.postalCode ? (
+                <p className="ck-note" data-testid="checkout-postal-note">
+                  {copy.postalNote(quote.postalCode, quote.chatPostalCode)}
+                </p>
+              ) : null}
               <p className="ck-note">{copy.escrowNote}</p>
 
+              {fromProfile ? (
+                <div className="ck-delivery" data-testid="checkout-dia-profile">
+                  <h3 className="ck-title">{copy.diaTitle}</h3>
+                  <p className="ck-note">{copy.profileUsing(profile?.email ?? '')}</p>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTypeOwn(true)} disabled={step === 'locking'}>
+                    {copy.profileOther}
+                  </button>
+                </div>
+              ) : (
               <fieldset className="ck-delivery" disabled={step === 'locking'} data-testid="checkout-dia">
                 <h3 className="ck-title">{copy.diaTitle}</h3>
                 <p className="ck-note">{copy.diaLead}</p>
@@ -343,7 +381,12 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                     </label>
                   </div>
                 </details>
+                <label className="ck-check">
+                  <input type="checkbox" checked={saveToProfile} onChange={(e) => setSaveToProfile(e.target.checked)} />
+                  {copy.saveToProfile}
+                </label>
               </fieldset>
+              )}
 
               {short ? (
                 <>
@@ -360,7 +403,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                   className="btn"
                   data-testid="checkout-lock"
                   onClick={() => void lock()}
-                  disabled={step === 'locking' || short || !balance || !loginReady(dia)}
+                  disabled={step === 'locking' || short || !balance || !ready}
                 >
                   {step === 'locking' ? copy.locking : copy.lockCta(quote.amountDisplay)}
                 </button>

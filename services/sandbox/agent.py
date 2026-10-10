@@ -3,8 +3,9 @@
 Jev drives the login (a Flutter popup with no stable selectors) and is the fallback for any
 step the deterministic path in checkout.py cannot finish. Jev never generates text: each step
 it answers typed questions and the sandbox executes the choice. Credentials are typed by the
-sandbox from the job's secrets; Jev only picks "fill_*" actions. The card is never Jev's:
-checkout.py types it from CARD_* and presses Pay only when CARD_PAN is set.
+sandbox from the job's shopper; Jev only picks "fill_*" actions. The card is never Jev's:
+checkout.py types the job's card (the web app's `shared_card` row) and presses Pay only
+when the job has one. Nothing here reads a credential or a card from the environment.
 """
 
 from __future__ import annotations
@@ -41,6 +42,8 @@ PAGE_KINDS = {
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Jev logs in to Dia Argentina, builds a cart and walks checkout up to payment.")
     p.add_argument("--list", default="fideos, jamón, queso, nuggets", help="comma-separated shopping list")
+    p.add_argument("--job", help="JSON file with the job's `shopper` and optional `card`, the same shapes as"
+                                 " POST /jobs (keep it out of git: traces/ is ignored)")
     p.add_argument("--skus", default="", help="comma-separated VTEX SKU ids, aligned with --list (blank = search by name)")
     p.add_argument("--headed", action="store_true", help="show the browser (slowed down) to watch Jev work")
     p.add_argument("--trace", action="store_true", help="save a Playwright trace (from after login) + per-step Jev jsonl in traces/")
@@ -271,14 +274,16 @@ async def jev_loop(run: Run, phase: str, items: list[str], done_items: list[str]
     return await until(was_in_popup)
 
 
-async def run_job(items: list[dict | str], *, secrets: dict | None = None, headed: bool = False,
+async def run_job(items: list[dict | str], *, secrets: dict | None = None, card: dict | None = None,
+                  headed: bool = False,
                   trace: bool = False, max_steps: int = 60, min_confidence: float = 0.15,
                   model: str | None = None, hold: float = 8.0, record: bool = False, on_phase=None) -> dict:
     """One sandbox run. Returns what changuito's job API reports (services/sandbox/server.py).
 
     `items` are `{name, quantity, sku?}` (a bare string is a name to search for). Lines with a SKU
     are added through VTEX's cart API; only the rest are shopped by Jev.
-    `secrets` are the shopper's login and address (sandbox.Secrets); absent, the operator's env.
+    `secrets` are the shopper's login and address (sandbox.Secrets); `card` is what to pay with
+    (server.py `Card`). Both come from the job only. No card: the run stops at the payment step.
     `on_phase(name)` is called on entering each phase so a caller can show progress.
     """
     lines = [{"name": i, "quantity": 1, "sku": None} if isinstance(i, str) else i for i in items]
@@ -386,7 +391,7 @@ async def run_job(items: list[dict | str], *, secrets: dict | None = None, heade
 
             enter("payment")
             await sb.stop_trace(trace_zip)  # never record the card form
-            pay = await checkout.pay(sb)
+            pay = await checkout.pay(sb, card)
             print(f"    payment: {pay['payment']}" + (f" — {pay['detail']}" if pay.get("detail") else ""))
         except _Stop:
             pass
@@ -454,8 +459,14 @@ async def run(args: argparse.Namespace) -> int:
     skus = [s.strip() for s in args.skus.split(",")] if args.skus else []
     items = [{"name": n, "quantity": 1, "sku": skus[i] if i < len(skus) and skus[i] else None}
              for i, n in enumerate(names)]
-    out = await run_job(items, headed=args.headed, trace=args.trace, max_steps=args.max_steps,
-                        min_confidence=args.min_confidence, model=args.model, hold=args.hold, record=args.record)
+    job = json.loads(Path(args.job).read_text()) if args.job else {}
+    if not job.get("shopper"):
+        print("--job <file.json> with a `shopper` (email, password, dni, postcode) is required: the sandbox"
+              " reads no credentials from the environment. Add a `card` to pay; without one it stops at payment.")
+        return 2
+    out = await run_job(items, secrets=job["shopper"], card=job.get("card"), headed=args.headed, trace=args.trace,
+                        max_steps=args.max_steps, min_confidence=args.min_confidence, model=args.model,
+                        hold=args.hold, record=args.record)
     return 0 if out["reached_payment"] else (2 if out["phase"] == "login" and (out.get("error") or "").startswith("store") else 3)
 
 

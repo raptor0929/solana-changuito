@@ -19,6 +19,7 @@ import type { Cart } from '@changuito/mcp/types';
 import { quoteRate } from '../../../../lib/checkout/rate.ts';
 import { NO_DELIVERY, quoteShipping, type ShippingLocation } from '../../../../lib/checkout/shipping.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
+import { getProfile } from '../../../../lib/profile.ts';
 import type { QuoteResponse } from '../../../../lib/checkout/types.ts';
 import { DEPLOYMENTS } from '../../../../lib/deployments.ts';
 import { bytesToHex } from '../../../../lib/escrow.ts';
@@ -57,6 +58,16 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // The postal code the shopper browsed with: prices, stock and envío are all quoted per area.
+  // The profile's postcode wins over the chat's: it is where the shopper said
+  // they live, and where the sandbox will deliver.
+  let saved: string | undefined;
+  try {
+    saved = (await getProfile(user.address))?.postcode;
+  } catch (err) {
+    console.warn('[checkout] profile unreadable for quote', err instanceof Error ? err.name : err);
+  }
+  const chatPostal = isLocation(body.location) ? body.location.postalCode : undefined;
+  if (saved) body.location = { ...(isLocation(body.location) ? body.location : {}), postalCode: saved };
   if (!isLocation(body.location)) {
     return Response.json({ error: 'Falta tu código postal. Contale al chat dónde estás y volvé a intentar.' }, { status: 400 });
   }
@@ -113,6 +124,9 @@ export async function POST(req: Request): Promise<Response> {
     subtotalCentavos: cart.total.centavos,
     shippingCentavos: shipping.centavos,
     totalCentavos,
+    postalCode: location.postalCode,
+    postalSource: saved ? 'profile' : 'chat',
+    chatPostalCode: chatPostal ?? null,
     programId: DEPLOYMENTS.devnet.programId,
     usdcMint: DEPLOYMENTS.devnet.usdcMint,
   };

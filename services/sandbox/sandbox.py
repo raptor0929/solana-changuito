@@ -8,7 +8,6 @@ action, the sandbox types the value, and every known value is redacted from what
 
 from __future__ import annotations
 
-import os
 import json
 import re
 from dataclasses import dataclass, field
@@ -47,7 +46,7 @@ ALLOWED_HOSTS = (
 )
 
 # Network-level guarantee that no order is placed, whatever gets clicked, until checkout.py
-# lifts it on purpose (`allow_payment`) after the card is typed and CARD_PAN is configured.
+# lifts it on purpose (`allow_payment`) after the job's card is typed.
 ORDER_ENDPOINTS = re.compile(r"/transaction|/gatewayCallback|/payments\b|orderPlaced", re.I)
 
 # Never offered to Jev, never clicked.
@@ -73,13 +72,11 @@ SECRET_FIELDS = {
 
 # Redaction tags, longest-lived values first. Card values are added by checkout.py.
 REDACT_TAGS = {"dni": "[DNI]", "email": "[EMAIL]", "postcode": "[CP]", "password": "[PWD]",
-               "street": "[STREET]", "phone": "[PHONE]", "pan": "[PAN]", "cvv": "[CVV]", "holder": "[NAME]",
-               "card_dni": "[DNI]"}
+               "street": "[STREET]", "phone": "[PHONE]", "pan": "[PAN]", "cvv": "[CVV]", "holder": "[NAME]"}
 
-# Env fallback for the CLI and for jobs that carry no credentials.
-ENV_SECRETS = {"dni": "DIA_ARG_DNI", "email": "DIA_ARG_EMAIL", "password": "DIA_ARG_PWD",
-               "postcode": "DIA_ARG_POSTCODE", "street": "DIA_ARG_ADDR_STREET", "number": "DIA_ARG_ADDR_NUMBER",
-               "phone": "DIA_ARG_ADDR_PHONE", "complement": "DIA_ARG_ADDR_COMPLEMENT"}
+# What a job's `shopper` may carry. Nothing comes from the environment: the login is the
+# shopper's own, from their profile in the web app, every time.
+SHOPPER_KEYS = ("dni", "email", "password", "postcode", "street", "number", "phone", "complement")
 
 
 class Secrets(dict):
@@ -87,13 +84,7 @@ class Secrets(dict):
 
     @classmethod
     def build(cls, job: dict | None = None) -> "Secrets":
-        job = {k: v for k, v in (job or {}).items() if v}
-        # A job that brings the shopper's login brings everything: the operator's env values
-        # (account, address) must never be typed into somebody else's account.
-        if any(job.get(k) for k in ("dni", "email", "password")):
-            return cls({k: str(job[k]) for k in ENV_SECRETS if k in job})
-        return cls({k: str(job.get(k) or os.environ[env]) for k, env in ENV_SECRETS.items()
-                    if job.get(k) or os.environ.get(env)})
+        return cls({k: str(v) for k, v in (job or {}).items() if k in SHOPPER_KEYS and v})
 
     def __repr__(self) -> str:
         return f"Secrets({sorted(self)})"

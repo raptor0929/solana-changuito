@@ -8,7 +8,7 @@
  *   - anything else              -> refund: vault -> buyer
  *
  * "Anything else" includes a declined card, a card that was never tried (the
- * sandbox has no CARD_* configured) and a run that never reached payment.
+ * job carried no card because `shared_card` has no row) and a run that never reached payment.
  * The treasury keeps the USDC only when the operator's card actually paid
  * for the shopper's order; the receipt carries Día's order number.
  *
