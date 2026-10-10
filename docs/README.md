@@ -39,7 +39,7 @@ Elsewhere in the repo:
   Pagar → sign in with email or Google (Privy creates a Solana wallet)
         │
         ▼
-  the server quotes the cart in USDC (live ARS/USD + 15% for envío)
+  the server quotes the cart in USDC (store price + delivery fee, at Belo's USDC rate)
         │
         ▼
   one transaction, buyer-signed, fee paid by the resolver:

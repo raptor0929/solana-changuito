@@ -227,7 +227,7 @@ in `apps/web/.env.example`; setup in [`../DEPLOY.md`](../DEPLOY.md).
 | `SANDBOX_TOKEN` | with `SANDBOX_URL` | Bearer token; must equal the sandbox's own `SANDBOX_TOKEN` |
 | `SANDBOX_MOCK` | no | `1` lets a production build use the mock — a demo without the browser farm |
 | `SANDBOX_MOCK_FAIL` | no | `1` makes the mock fail at checkout: the refund path |
-| `ARS_PER_USD` | no | pin the rate so a demo quotes the same number every time. Unset means the live feed |
+| `ARS_PER_USD` | no | pin the rate so a demo quotes the same number every time. Unset means the live feed: Belo's USDC `compra` from dolarapi.com |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | in production | the human gate. The secret alone decides it, and unset in production it fails shut |
 | `DATABASE_URL` | in production | conversation history, quotas and checkout records across instances (`kv`, `quota`), and the chat archive for signed-in wallets. Locally an in-process Map stands in; in production the quotas fail closed without it. Orders do not need it |
 | `OPENAI_API_KEY`, `OPENAI_MODEL` | no | if the key is set, the agent runs on OpenAI instead of Anthropic |

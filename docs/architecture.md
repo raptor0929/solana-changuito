@@ -31,9 +31,10 @@ What this demo does **not** do, stated up front:
   link.
 - **Devnet only, mock USDC.** The mint is ours (`BZ6CHG…LG85`), minted by the
   in-app faucet.
-- **The 15% FX buffer goes to the treasury** with the rest on settle. It exists
-  because envío is only known at checkout, after the money is locked; returning
-  the unused part is not implemented.
+- **The quote is exact, at Belo's USDC `compra`.** Items and delivery come from
+  Día's cart simulation for the shopper's postal code, before anything is
+  locked. `compra` is the price of buying USDC; selling it yields `venta`, about
+  1.6% less, and the treasury absorbs the gap.
 - **The sandbox runs one job at a time**, and adds one unit per line (quantity
   is recorded, not applied yet).
 
@@ -120,8 +121,9 @@ link. Losing it is survivable — see [failure modes](#failure-modes).
   (`canonicalBasket` in `lib/order.ts`: retailer, cart id, each line's sku,
   quantity, line total and availability, and the total) — not
   `JSON.stringify`, because key order is not a promise;
-- `amount` = peso total at today's ARS/USD rate plus 15%, in USDC base units
-  (`arsToUsdCents` from `@changuito/mcp/fx`; `ARS_PER_USD` overrides the rate);
+- `amount` = items plus delivery, both from Día's cart simulation, at Belo's
+  USDC `compra`, in USDC base units (`lib/checkout/shipping.ts`,
+  `lib/checkout/rate.ts`; `ARS_PER_USD` overrides the rate);
 - `timeout_secs` = 3600.
 
 `/api/checkout/start` then refuses to start any work until the chain agrees:
@@ -296,7 +298,7 @@ is kept as the on-chain record. A second close fails with `OrderClosed`.
 | Checkout record expires (`kv` 24h expiry) or `DATABASE_URL` is not set on a multi-instance deploy | `/status` returns 404; the server can no longer close the order | in the vault; only the buyer's self-refund after the deadline recovers it |
 | Resolver key missing or mismatched | `resolverSigner` refuses by name; faucet returns 503; `open` cannot be sent (502, nothing locked); settle/refund throw and the order stays open | in the vault, or still with the buyer if `open` never went out |
 | Resolver out of SOL | `open` fails at send (502, "No pudimos bloquear el pago"); settle/refund fail and retry on the next poll | still with the buyer, or in the vault until the resolver is topped up |
-| Price or envío differs at Día | not reconciled: the 15% buffer is the only cushion, and the whole locked amount goes to the treasury on settle | treasury |
+| Price or envío differs at Día | not reconciled: the quote is the store's own number a few minutes earlier, and the whole locked amount goes to the treasury on settle | treasury |
 
 ---
 

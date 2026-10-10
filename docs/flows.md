@@ -179,14 +179,23 @@ sequenceDiagram
 ```
 orderId    = crypto.getRandomValues(32)          random, NOT derived
 basketHash = sha256(canonicalBasket(cart))       lib/order.ts
-amount     = arsToUsdCents(total, arsPerUsd, 0.15)  @changuito/mcp/fx
-             (ARS_PER_USD pins the rate; otherwise the live feed)
+amount     = arsToUsdCents(items + delivery, arsPerUsd, 0)   @changuito/mcp/fx
+             items, delivery: Día's cart simulation      lib/checkout/shipping.ts
+             arsPerUsd: Belo USDC compra, dolarapi.com   lib/checkout/rate.ts
+             (ARS_PER_USD pins the rate)
 timeout    = 3600s
 ```
 
-- **The 15% is for envío**, which the store only reveals at checkout — after
-  the money is locked. It is float, not price, and on settle it goes to the
-  treasury with the rest. That is a demo simplification and is stated as one.
+- **Nothing is padded.** The server re-prices the basket and reads the
+  delivery fee from Día's cart simulation for the shopper's postal code; the
+  browser's own total is not trusted. The modal shows products, delivery,
+  total, the rate and the USDC, and the shopper confirms exactly those. A basket
+  with an unavailable item, or with no home delivery, is refused rather than
+  quoted. No rate (dolarapi down, no Belo USDC row) is a 503, never a quiet
+  switch to another source.
+- **`compra`, not `venta`.** Belo's USDC `compra` is the price of buying one
+  USDC; selling the shopper's USDC yields `venta`, about 1.6% less. The
+  treasury absorbs that gap, on purpose.
 - **`basket_hash` commits to the exact basket** — retailer, cart id, each
   line's index, SKU, quantity, line total and availability, and the total —
   as a versioned line-oriented text, not `JSON.stringify`, because a hash is a

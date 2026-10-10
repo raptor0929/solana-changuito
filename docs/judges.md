@@ -79,7 +79,7 @@ being told.
 | The USDC | **Our own devnet mint**, handed out by the in-app faucet. Not Circle's USDC, no value |
 | Gas | **Fees paid by the resolver** (a server hot key, so it must be kept topped up with devnet SOL). Rent is the buyer's: the faucet also sends 0.01 SOL when the wallet is below 0.006, which covers the ~0.004 SOL of rent for the order and vault accounts |
 | **A placed order at Día** | **Not done.** The sandbox walks the real checkout with the basket and **stops at the payment step**. Card entry is out of scope. Settle means "the agent proved it could get this basket to checkout"; the shopper finishes at Día through their own cart link |
-| Where settled USDC goes | **To a treasury we hold**, which does not pay Día. The 15% FX buffer (for envío, only known at checkout) goes with it. A demo simplification |
+| Where settled USDC goes | **To a treasury we hold**, which does not pay Día. The amount is the store's price plus its delivery fee at Belo's USDC rate, confirmed by the shopper before locking. A demo simplification |
 | The checkout robot | **Runs on one operator Día account**, one job at a time, jobs held in memory. It adds one unit per line (quantity is recorded, not applied yet) and searches by name |
 | Sandbox deployment | **Not deployed to Railway yet.** It runs locally in Docker, and a two-item escrow run against Día reached the payment step (214 s, 0 orders placed) and [settled](https://solscan.io/tx/3akyS29xEdce7Phd7TrVaPoTzxjWaf7Uum5Xn8g9nxgRafJZmvBgN28ahm94Yu8bzoQDtmR2G9L325RSPePearWP?cluster=devnet). On any build without `SANDBOX_URL`, an in-process mock plays the phases (0/4/7/15/20 s). The other settle/refund transactions above were produced against the mock |
 

@@ -290,7 +290,8 @@ These e2e runs used the in-process mock sandbox, not the Railway service.
 - **Devnet and a mock mint.** Nothing here moves real value.
 - **Settle is not a purchase.** The resolver settles when the sandbox reaches
   Día's payment step; no order is placed at Día (see [sandbox.md](sandbox.md)).
-  The full locked amount, including the 15% FX buffer, goes to the treasury.
+  The full locked amount (store price plus delivery, at Belo's USDC rate) goes
+  to the treasury.
 - **The receipt hash is not independently reproducible yet.** It is SHA-256 of
   a text that includes the order, buyer, basket hash, amount, the basis
   `sandbox-reached-payment`, the sandbox job id, the sandbox's `orderFormId`
