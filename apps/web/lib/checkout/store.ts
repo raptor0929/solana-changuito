@@ -24,8 +24,16 @@ export interface CheckoutRecord {
   /** Hex. */
   basketHash: string;
   arsPerUsd: number;
-  /** Pesos as the shopper saw them. */
+  /** Pesos as the shopper saw them: items plus delivery. */
   totalDisplay: string;
+  /**
+   * The breakdown behind the total. Optional rather than a version bump: a
+   * record quoted before these existed is still readable for its 24 hours.
+   */
+  itemsCentavos?: number;
+  shippingCentavos?: number;
+  shippingLabel?: string;
+  rateSource?: string;
   retailer: string;
   lines: { name: string; skuId: string; quantity: number; lineTotal: string }[];
   /** The shopper's own cart link at the store. */

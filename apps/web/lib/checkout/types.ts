@@ -9,6 +9,17 @@ export interface QuoteResponse {
   basketHash: string;
   timeoutSecs: number;
   arsPerUsd: number;
+  /** Where the rate came from: `belo`, or `ARS_PER_USD` when pinned. */
+  rateSource: string;
+  /** The breakdown the shopper confirms, in centavos and as display strings. */
+  itemsCentavos: number;
+  shippingCentavos: number;
+  totalCentavos: number;
+  itemsDisplay: string;
+  shippingDisplay: string;
+  totalDisplay: string;
+  /** The store's name for the delivery option, e.g. "Envío a Domicilio". */
+  shippingLabel: string;
   programId: string;
   usdcMint: string;
 }
