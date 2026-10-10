@@ -14,7 +14,10 @@ import { STOREFRONT_ORIGINS } from './storefront.ts';
  * - Privy: the auth API, its embedded-wallet iframe and its relays (below).
  * - Solana devnet: the RPC (https and wss) from deployments.ts, which the
  *   balance reads and the open transaction's blockhash go through.
- * - Product photos: every retailer serves them from *.vtexassets.com.
+ * - Product photos: VTEX serves them from two CDNs. *.vtexassets.com is the
+ *   current one; *.vteximg.com.br is the older one, and Día still returns it
+ *   for part of its catalogue (ardiaprod.vteximg.com.br), so a grid with only
+ *   the first allowed draws some cards without a picture.
  * - Supermarket origins stay in frame-src; see lib/storefront.ts.
  * - Analytics: only the vendors whose id is set, same as www.
  *
@@ -40,7 +43,7 @@ const SOLANA = [
     }),
   ),
 ];
-const PRODUCT_IMAGES = 'https://*.vtexassets.com';
+const PRODUCT_IMAGES = 'https://*.vtexassets.com https://*.vteximg.com.br';
 
 export function analyticsCspSources(ids: AnalyticsIds = ANALYTICS_IDS): { script: string[]; connect: string[]; img: string[] } {
   const script: string[] = [];
