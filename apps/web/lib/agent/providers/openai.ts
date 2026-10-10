@@ -14,6 +14,15 @@ import type { HopCallbacks, HopRequest, HopResult, Provider } from './types';
 
 const MODEL = process.env.OPENAI_MODEL?.trim() || 'gpt-4.1';
 
+/**
+ * Sent only when set, because no one value works for every model. The Luna
+ * models take function tools on Chat Completions only at `none`; gpt-5-nano
+ * rejects `none` and bottoms out at `minimal`; gpt-4.1 and gpt-4o-mini are not
+ * reasoning models and reject the parameter outright. Unset sends nothing,
+ * which is what this file did before it existed.
+ */
+const REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT?.trim() || '';
+
 type OaiContent =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
@@ -143,6 +152,7 @@ export function openaiProvider(): Provider {
           model: MODEL,
           stream: true,
           max_completion_tokens: 4096,
+          ...(REASONING_EFFORT ? { reasoning_effort: REASONING_EFFORT } : {}),
           messages: openAiMessages(req),
           tools: openAiTools(req.tools),
         }),
@@ -152,6 +162,10 @@ export function openaiProvider(): Provider {
       if (!res.ok || !res.body) {
         // The body can echo the request. Never log it: it carries the photo
         // and, on a 401, nothing we want next to the key in a build log.
+        // Its error's type, code and param are identifiers, not content, and
+        // without them a 400 says that the request was wrong but not where.
+        const err = ((await res.json().catch(() => null)) as { error?: Record<string, unknown> } | null)?.error;
+        console.error('[openai]', res.status, MODEL, { type: err?.type, code: err?.code, param: err?.param });
         throw new Error(
           res.status === 401
             ? 'OpenAI rechazó la clave. Revisá OPENAI_API_KEY en Vercel.'
