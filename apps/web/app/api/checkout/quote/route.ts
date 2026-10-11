@@ -19,7 +19,9 @@ import type { Cart } from '@changuito/mcp/types';
 import { quoteRate } from '../../../../lib/checkout/rate.ts';
 import { NO_DELIVERY, quoteShipping, type ShippingLocation } from '../../../../lib/checkout/shipping.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
+import { sandboxFlags } from '../../../../lib/config.ts';
 import { getProfile } from '../../../../lib/profile.ts';
+import { cardAccess } from '../../../../lib/shared-card.ts';
 import type { QuoteResponse } from '../../../../lib/checkout/types.ts';
 import { DEPLOYMENTS } from '../../../../lib/deployments.ts';
 import { bytesToHex } from '../../../../lib/escrow.ts';
@@ -55,6 +57,20 @@ export async function POST(req: Request): Promise<Response> {
   const lines = cart.lines.filter((l) => l.available && l.quantity > 0);
   if (lines.length === 0 || cart.total.centavos <= 0) {
     return Response.json({ error: 'El changuito está vacío.' }, { status: 400 });
+  }
+
+  // Only wallets on the card's member list may buy with it (lib/shared-card.ts).
+  // Asked here, before anything is locked, so a wallet that is not on the
+  // list hears it now instead of after a lock and a refund.
+  const access = await cardAccess(user.address, (await sandboxFlags()).mock);
+  if (access === 'not-member') {
+    return Response.json(
+      { error: 'Todavía no estás habilitado para comprar con Changuito. Pedinos acceso y te avisamos.' },
+      { status: 403 },
+    );
+  }
+  if (access === 'no-card') {
+    return Response.json({ error: 'Las compras no están disponibles en este momento. Probá más tarde.' }, { status: 503 });
   }
 
   // The postal code the shopper browsed with: prices, stock and envío are all quoted per area.

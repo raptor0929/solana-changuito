@@ -20,7 +20,7 @@ import { startJob } from '../../../../lib/checkout/sandbox.ts';
 import { readShopper } from '../../../../lib/checkout/shopper.ts';
 import { sandboxFlags } from '../../../../lib/config.ts';
 import { getProfile } from '../../../../lib/profile.ts';
-import { checkoutCard } from '../../../../lib/shared-card.ts';
+import { checkoutCardFor } from '../../../../lib/shared-card.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
 import type { StatusResponse } from '../../../../lib/checkout/types.ts';
 import { readLoggedInUser } from '../../../../lib/login-gate.ts';
@@ -74,9 +74,11 @@ export async function POST(req: Request): Promise<Response> {
 
     rec.openSig = typeof body?.openSig === 'string' ? body.openSig : rec.openSig;
     try {
-      // The operator's card, from shared_card. None means the run stops at
-      // the payment step and refunds; a failed read is the same, not a 500.
-      const card = await checkoutCard().catch((err) => {
+      // The operator's card, from shared_card, and only for a wallet on its
+      // member list (the quote already said so; this is the check that
+      // counts). None means the run stops at the payment step and refunds;
+      // a failed read is the same, not a 500.
+      const card = await checkoutCardFor(user.address).catch((err) => {
         console.error('[checkout/start] card', err instanceof Error ? err.name : 'read failed');
         return undefined;
       });
