@@ -10,7 +10,9 @@
  *   faucet -> save profile -> quote -> open (server builds, resolver pays the
  *   fee) -> buyer signs -> server co-signs and sends -> start -> poll status
  *
- * and prints the outcome with Solscan links. Which sandbox runs is the
+ * and prints the outcome with Solscan links. The throwaway wallet is on no
+ * card member list, so run this with the mock on (which skips that gate);
+ * against the real sandbox the quote answers 403. Which sandbox runs is the
  * `config` table's call, not this script's: `npm run config -- set
  * sandbox_mock true` for the mock (settles), plus `sandbox_mock_fail true` for
  * a declined card (refunds). With the mock off and no SANDBOX_URL, start fails

@@ -22,6 +22,7 @@
     "db:migrate": "node scripts/db.mjs migrate",
     "db:status": "node scripts/db.mjs status",
     "config": "node scripts/config.mjs",
+    "members": "node scripts/members.mjs",
     "db:invariants": "node scripts/db-invariants.mjs",
     "db:archive": "node --experimental-strip-types scripts/db-chat-archive.mts",
     "program:build": "cd anchor/programs/changuito_escrow && cargo build-sbf --tools-version v1.56 --arch v3",

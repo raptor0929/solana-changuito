@@ -364,7 +364,11 @@ gets placed. What it was protecting is kept in the rules below.*
 - **The card is the gate.** The sandbox presses Pay only when the job carries a
   card — the `shared_card` row (migration 0004, `lib/shared-card.ts`), devnet
   row first, else mainnet, read at `/api/checkout/start` and pushed in the job
-  body like the shopper's login. Nothing on the sandbox holds a card or a Día
+  body like the shopper's login — **only for a wallet on `shared_card_member`**
+  for the card's network (`npm run members -- add <address>`). Checked at the
+  quote, so a non-member is told before locking anything, and again at the
+  start, which is the check that counts; an unreadable list fails closed. The
+  mock touches no card and skips the gate. Nothing on the sandbox holds a card or a Día
   login any more: no `CARD_*`, no `DIA_ARG_*`. Until the card is typed, the
   order and payment endpoints stay aborted at the network layer; no row in
   `shared_card` means no card in the job, so the run stops at payment. It is derived from the resource, per §5 —
